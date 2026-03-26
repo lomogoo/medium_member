@@ -1,0 +1,729 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>勤務場所管理</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      body { font-family: 'Noto Sans JP', 'Helvetica Neue', sans-serif; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="text/babel">
+const { useState, useMemo, useCallback, useEffect } = React;
+
+/* ══ Supabase 設定 ══════════════════════════════════════════
+   Supabase プロジェクトの URL と anon key に書き換えてください  */
+const SUPABASE_URL      = 'https://tfkzsbwhvhgxbnnfwtou.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRma3pzYndodmhneGJubmZ3dG91Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjU3MjA5MTksImV4cCI6MjA4MTI5NjkxOX0.R39CQFyCPNbdX2GKBmjXriDUcR6D7EB-vLDFsINY96w';
+const SUPABASE_OK = SUPABASE_URL !== 'YOUR_SUPABASE_URL';
+const sb = SUPABASE_OK
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+/* ══ テーマ ════════════════════════════════════════════════ */
+const BRAND      = "#0071C5";
+const BRAND_LIGHT = "#e8f2fb";
+const BRAND_PALE  = "#f4f8fc";
+const BRAND_MID   = "#b3d4f0";
+const RED_ALERT   = "#e74c3c";
+const RED_LIGHT   = "#fdecea";
+const GREEN_OK    = "#27ae60";
+
+/* ══ マスターデータ ═════════════════════════════════════════ */
+const STATUS_OPTIONS = [
+  { key: "MEDIUM_ALL",         label: "終日MEDIUM勤務",    short: "LOGO" },
+  { key: "AM_MEDIUM_PM_OTHER", label: "午前のみMEDIUM勤務", short: "AM"   },
+  { key: "PM_MEDIUM_AM_OTHER", label: "午後のみMEDIUM勤務", short: "PM"   },
+  { key: "ABSENT",             label: "不在",              short: "✖"    },
+];
+
+const SEED_MEMBERS = [
+  { name:"児玉龍哉",   color:"#0071C5", display_order:1 },
+  { name:"相澤麻未",   color:"#2196F3", display_order:2 },
+  { name:"髙橋宏祐",   color:"#00897B", display_order:3 },
+  { name:"庄司結衣",   color:"#5C6BC0", display_order:4 },
+  { name:"佐藤碧伊",   color:"#0277BD", display_order:5 },
+  { name:"荒田考太郎", color:"#00838F", display_order:6 },
+  { name:"吉田陸人",   color:"#1565C0", display_order:7 },
+];
+
+/* ══ ユーティリティ ════════════════════════════════════════ */
+const TODAY = new Date(); TODAY.setHours(0,0,0,0);
+
+function fmt(d)  { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; }
+function pd(s)   { const [y,m,d]=s.split("-").map(Number); return new Date(y,m-1,d); }
+function isWE(d) { return d.getDay()===0||d.getDay()===6; }
+function mdays(y,m){ const a=[],d=new Date(y,m,1); while(d.getMonth()===m){a.push(new Date(d));d.setDate(d.getDate()+1);} return a; }
+function maxDate(){ const d=new Date(TODAY); d.setMonth(d.getMonth()+3); return d; }
+function daysLater(n){ const d=new Date(TODAY); d.setDate(d.getDate()+n); return d; }
+function dow(d)  { return ["日","月","火","水","木","金","土"][d.getDay()]; }
+function mLabel(y,m){ return `${y}年${m+1}月`; }
+function initials(name){ const p=name.trim().split(/\s+/); return p.length>1?p[0][0]+p[1][0]:name[0]; }
+function dispDate(ds){ const d=pd(ds); return `${d.getMonth()+1}/${d.getDate()}(${dow(d)})`; }
+function mkey(y,m){ return `${y}-${m}`; }
+/* 先々月（2ヶ月前）以前 → 要確認 */
+function isFarPast(y,m){ return y*12+m <= TODAY.getFullYear()*12+TODAY.getMonth()-2; }
+
+/* ══ ロゴ ════════════════════════════════════════════════= */
+/* ヘッダー用：フルロゴ（高さ指定） */
+function MediumLogo({ height=40 }){
+  return <img src="logo.svg" alt="MEDIUM" height={height} style={{ display:"block", objectFit:"contain" }}/>;
+}
+/* セル・凡例用：BDIUシンボル部のみをインラインSVGで表示（切れ・はみ出しなし） */
+function MediumMark({ size=14 }){
+  return (
+    <svg width={size} height={size} viewBox="0 0 72.09 72.09" fill="none"
+      style={{ display:"inline-block", verticalAlign:"middle", flexShrink:0 }}>
+      <path d="M53.1183 0C45.6082 0 39.1179 4.36214 36.045 10.6934C32.9677 4.36214 26.4775 0 18.9718 0C8.49469 0 0 8.49469 0 18.9718H72.09C72.09 8.49469 63.5954 0 53.1183 0Z" fill="#202629"/>
+      <path d="M48.0453 24.7114H40.3145V49.2065H48.0453V24.7114Z" fill="#202629"/>
+      <path d="M53.1183 53.1183C45.6082 53.1183 39.1179 57.4804 36.045 63.8117C32.9721 57.4804 26.4819 53.1183 18.9718 53.1183C8.49469 53.1183 0 61.613 0 72.09H72.09C72.09 61.613 63.5954 53.1183 53.1183 53.1183Z" fill="#202629"/>
+      <path d="M0 49.2595C0 49.2595 3.10824 49.3125 6.05754 49.2065C9.38212 49.0873 11.338 47.5199 11.338 44.8311C11.338 43.096 10.2519 41.5992 8.68454 40.8928C10.2519 40.1864 11.338 38.6897 11.338 36.9545C11.338 35.2194 10.2519 33.7227 8.68454 33.0163C10.2519 32.3098 11.338 30.8131 11.338 29.078C11.338 26.3892 9.38212 24.8218 6.05754 24.7026C3.10824 24.6055 0 24.6584 0 24.6584V49.2595Z" fill="#202629"/>
+      <path d="M72.0463 24.7114H53.6485C53.6485 24.7114 53.5337 34.5615 53.7368 40.3365C53.9399 46.1159 57.5736 49.6966 62.8452 49.6966C68.1169 49.6966 71.7505 46.1159 71.9536 40.3365C72.1567 34.5571 72.0419 24.7114 72.0419 24.7114H72.0463Z" fill="#202629"/>
+      <path d="M16.0137 49.2551H20.7114C24.3141 49.2551 28.248 48.7164 31.2061 46.4735C34.2834 44.1424 35.4402 40.3542 35.4402 36.6057C35.4402 33.1001 34.0715 29.7358 31.2635 27.5857C28.248 25.2765 24.3494 24.6584 20.654 24.6584H16.0181V49.2551H16.0137Z" fill="#202629"/>
+    </svg>
+  );
+}
+
+/* ══ 汎用 UI ════════════════════════════════════════════════ */
+const navBtn = { background:"none", border:`1px solid ${BRAND_LIGHT}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", color:BRAND, fontSize:14, fontFamily:"inherit" };
+const thS = { padding:"8px 4px", fontSize:11, fontWeight:600, borderBottom:`1px solid ${BRAND_LIGHT}`, borderRight:`1px solid ${BRAND_LIGHT}`, textAlign:"center", whiteSpace:"nowrap" };
+const tdS = { padding:"6px 4px", borderBottom:`1px solid ${BRAND_LIGHT}`, borderRight:`1px solid ${BRAND_LIGHT}`, fontSize:12, textAlign:"center" };
+
+function Bell({ count, onClick }){
+  return (
+    <button onClick={onClick} style={{ position:"relative", background:"none", border:"none", cursor:"pointer", padding:8, borderRadius:8 }}
+      onMouseEnter={(e)=>e.currentTarget.style.background=BRAND_LIGHT}
+      onMouseLeave={(e)=>e.currentTarget.style.background="none"}>
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={BRAND} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+      {count>0&&<span style={{ position:"absolute", top:2, right:2, background:RED_ALERT, color:"#fff", borderRadius:"50%", width:18, height:18, fontSize:11, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center" }}>{count}</span>}
+    </button>
+  );
+}
+
+function Modal({ open, onClose, title, children, width=480 }){
+  if (!open) return null;
+  return (
+    <div style={{ position:"fixed", inset:0, zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(0,40,80,0.25)", backdropFilter:"blur(4px)" }} onClick={onClose}>
+      <div onClick={(e)=>e.stopPropagation()} style={{ background:"#fff", borderRadius:16, width:"90%", maxWidth:width, maxHeight:"85vh", overflow:"auto", boxShadow:"0 20px 60px rgba(0,50,100,0.18)" }}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"18px 24px", borderBottom:`1px solid ${BRAND_LIGHT}` }}>
+          <h3 style={{ margin:0, fontSize:16, fontWeight:700, color:"#1a2a3a" }}>{title}</h3>
+          <button onClick={onClose} style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#8a9ab0", padding:"4px 8px", borderRadius:6 }}>✕</button>
+        </div>
+        <div style={{ padding:"20px 24px" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Toast({ message, visible }){
+  if (!visible) return null;
+  return (
+    <div style={{ position:"fixed", bottom:24, left:"50%", transform:"translateX(-50%)", background:"#1a2a3a", color:"#fff", padding:"10px 24px", borderRadius:10, fontSize:13, fontWeight:500, zIndex:2000, display:"flex", alignItems:"center", gap:8 }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={GREEN_OK} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+      {message}
+    </div>
+  );
+}
+
+function StatusOpts({ current, onSelect, onClear, showClear }){
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+      {STATUS_OPTIONS.map((opt)=>{
+        const sel=current===opt.key;
+        return (
+          <button key={opt.key} onClick={()=>onSelect(opt.key)}
+            style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, border:sel?`1.5px solid ${BRAND}`:`1px solid #dde4ee`, background:sel?`${BRAND}10`:"#fff", cursor:"pointer", fontFamily:"inherit", fontSize:13, color:sel?BRAND:"#445", fontWeight:sel?600:400 }}>
+            <span style={{ width:18, height:18, borderRadius:"50%", border:sel?`5px solid ${BRAND}`:`2px solid #ccc`, background:"#fff", flexShrink:0 }}/>
+            {opt.key==="MEDIUM_ALL"
+              ? <span style={{ display:"flex", alignItems:"center", gap:6 }}><MediumMark size={12}/> {opt.label}</span>
+              : opt.label}
+          </button>
+        );
+      })}
+      {showClear&&(
+        <button onClick={onClear} style={{ marginTop:4, padding:"7px 12px", background:"#fff", color:RED_ALERT, border:`1px solid ${RED_ALERT}33`, borderRadius:8, fontSize:12, fontWeight:500, cursor:"pointer", fontFamily:"inherit", alignSelf:"flex-start" }}>クリア（未設定に戻す）</button>
+      )}
+    </div>
+  );
+}
+
+/* ══ プロフィール選択（Netflix 風） ═══════════════════════════ */
+function ProfilePicker({ members, onSelect }){
+  const [hovered, setHovered] = useState(null);
+  return (
+    <div style={{ position:"fixed", inset:0, background:"#141414", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:500, padding:"24px" }}>
+      <img src="logo.svg" alt="MEDIUM" height={36}
+        style={{ filter:"brightness(0) invert(1)", opacity:0.85, marginBottom:44 }}/>
+      <h2 style={{ color:"#e5e5e5", fontSize:20, fontWeight:400, letterSpacing:4, marginBottom:52, fontFamily:"'Noto Sans JP',sans-serif" }}>
+        だれですか？
+      </h2>
+      <div style={{ display:"flex", flexWrap:"wrap", gap:24, justifyContent:"center", maxWidth:560 }}>
+        {members.map(m=>(
+          <button key={m.id} onClick={()=>onSelect(m)}
+            onMouseEnter={()=>setHovered(m.id)}
+            onMouseLeave={()=>setHovered(null)}
+            style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:14, background:"none", border:"none", cursor:"pointer", padding:8, fontFamily:"'Noto Sans JP',sans-serif" }}>
+            <div style={{
+              width:86, height:86, borderRadius:"50%",
+              background: m.color,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:26, fontWeight:700, color:"#fff",
+              transition:"transform 0.15s, box-shadow 0.15s",
+              transform: hovered===m.id ? "scale(1.07)" : "scale(1)",
+              boxShadow: hovered===m.id ? `0 0 0 3px #fff` : "none",
+            }}>
+              {initials(m.name)}
+            </div>
+            <span style={{
+              fontSize:13, fontWeight:500,
+              color: hovered===m.id ? "#fff" : "#aaa",
+              transition:"color 0.15s",
+            }}>{m.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ══ アプリ本体 ══════════════════════════════════════════════ */
+function App(){
+  const [members, setMembers]         = useState([]);
+  const [schedules, setSchedules]     = useState({});      // { memberId: { dateStr: status } }
+  const [loadedMonths, setLoadedMonths] = useState(new Set());
+  const [appLoading, setAppLoading]   = useState(true);
+  const [monthLoading, setMonthLoading] = useState(false);
+
+  const [tab, setTab]                 = useState("overview");
+  const [viewMonth, setViewMonth]     = useState({ year:TODAY.getFullYear(), month:TODAY.getMonth() });
+  const [editMonth, setEditMonth]     = useState({ year:TODAY.getFullYear(), month:TODAY.getMonth() });
+  const [selectedMember, setSelectedMember] = useState(null);
+  const [pending, setPending]         = useState({});
+  const [openDay, setOpenDay]         = useState(null);
+  const [changeLog, setChangeLog]     = useState([]);
+  const [notifBadge, setNotifBadge]   = useState(0);
+
+  /* モーダル系 */
+  const [showNotif, setShowNotif]     = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  const [newName, setNewName]         = useState("");
+  const [confirmLoad, setConfirmLoad] = useState(null); // { year, month }
+  const [quickEdit, setQuickEdit]     = useState(null); // { member, dateStr }
+
+  const [toastMsg, setToastMsg]       = useState("");
+  const [toastVis, setToastVis]       = useState(false);
+
+  const [currentUser, setCurrentUser] = useState(null); /* ログイン中メンバー */
+
+  const MAX_DATE   = maxDate();
+  const TEN_LATER  = daysLater(10);
+
+  const toast = (msg)=>{ setToastMsg(msg); setToastVis(true); setTimeout(()=>setToastVis(false),2500); };
+
+  /* ─ Supabase: メンバー読み込み ─ */
+  const loadMembers = useCallback(async ()=>{
+    if (!SUPABASE_OK){
+      const local = SEED_MEMBERS.map((m,i)=>({ id:i+1, ...m }));
+      setMembers(local);
+      const sch={}; local.forEach(m=>sch[m.id]={}); setSchedules(sch);
+      setAppLoading(false); return;
+    }
+    const { data, error } = await sb.from("members").select("*").order("display_order");
+    if (error){ console.error(error); setAppLoading(false); return; }
+    let mList = data;
+    if (mList.length===0){
+      const { data:ins } = await sb.from("members").insert(SEED_MEMBERS).select();
+      mList = ins||[];
+    }
+    setMembers(mList);
+    const sch={}; mList.forEach(m=>sch[m.id]={}); setSchedules(sch);
+    setAppLoading(false);
+  }, []);
+
+  /* ─ Supabase: 月スケジュール読み込み ─ */
+  const loadMonthData = useCallback(async (year, month)=>{
+    const key = mkey(year, month);
+    setMonthLoading(true);
+    const start = `${year}-${String(month+1).padStart(2,"0")}-01`;
+    const last  = new Date(year, month+1, 0).getDate();
+    const end   = `${year}-${String(month+1).padStart(2,"0")}-${String(last).padStart(2,"0")}`;
+    if (SUPABASE_OK){
+      const { data } = await sb.from("schedules").select("member_id,date,status").gte("date",start).lte("date",end);
+      if (data){
+        setSchedules(prev=>{
+          const u={...prev};
+          data.forEach(r=>{
+            if (!u[r.member_id]) u[r.member_id]={};
+            u[r.member_id][r.date]=r.status;
+          });
+          return u;
+        });
+      }
+    }
+    setLoadedMonths(prev=>new Set([...prev, key]));
+    setMonthLoading(false);
+  }, []);
+
+  /* ─ Supabase: 通知データ読み込み＆バッジ計算（端末ごとの既読を localStorage で管理） ─ */
+  const loadNotifData = useCallback(async ()=>{
+    if (!SUPABASE_OK) return;
+    const todayStr    = fmt(TODAY);
+    const tenLaterStr = fmt(daysLater(10));
+    const { data } = await sb.from("change_logs")
+      .select("*")
+      .gte("date", todayStr)
+      .lte("date", tenLaterStr)
+      .order("changed_at", { ascending: false })
+      .limit(50);
+    if (!data) return;
+    const logs = data.map(r=>({
+      id: r.id,
+      memberId: r.member_id,
+      memberName: r.member_name,
+      date: r.date,
+      from: r.from_status,
+      to: r.to_status,
+      changedAt: r.changed_at,
+    }));
+    setChangeLog(logs);
+    /* この端末が最後に通知を確認した時刻（localStorage）より新しいものだけバッジに */
+    const lastSeen = localStorage.getItem("notif_last_seen_at");
+    const unread = lastSeen
+      ? logs.filter(l => l.changedAt > lastSeen && l.from !== "未設定")
+      : logs.filter(l => l.from !== "未設定");
+    setNotifBadge(unread.length);
+  }, []);
+
+  /* ─ 初回ロード ─ */
+  useEffect(()=>{ loadMembers(); }, [loadMembers]);
+
+  /* ─ メンバー確定後に当月を読み込む ─ */
+  useEffect(()=>{
+    if (members.length===0) return;
+    const key = mkey(TODAY.getFullYear(), TODAY.getMonth());
+    if (!loadedMonths.has(key)) loadMonthData(TODAY.getFullYear(), TODAY.getMonth());
+    loadNotifData();
+    /* localStorage からログインユーザーを復元 */
+    const savedId = localStorage.getItem("medium_current_user_id");
+    if (savedId){
+      const m = members.find(mem => String(mem.id) === savedId);
+      if (m){ setCurrentUser(m); setSelectedMember(m); }
+    }
+  }, [members]);
+
+  /* ─ viewMonth 変更時: 必要なら月データを読み込む ─ */
+  useEffect(()=>{
+    if (members.length===0) return;
+    const { year, month } = viewMonth;
+    const key = mkey(year, month);
+    if (loadedMonths.has(key)) return;
+    if (isFarPast(year, month)){
+      setConfirmLoad({ year, month });
+    } else {
+      loadMonthData(year, month);
+    }
+  }, [viewMonth, members]);
+
+  /* ─ editMonth 変更時: 先々月より新しければ自動読み込み ─ */
+  useEffect(()=>{
+    if (members.length===0) return;
+    const { year, month } = editMonth;
+    const key = mkey(year, month);
+    if (!loadedMonths.has(key) && !isFarPast(year, month)) loadMonthData(year, month);
+  }, [editMonth, members]);
+
+  /* ─ pending 系 ─ */
+  const resetPending = ()=>{ setPending({}); setOpenDay(null); };
+  const pendingCount = useMemo(()=>{
+    if (!selectedMember) return 0;
+    return Object.entries(pending).filter(([ds,v])=>{ const s=schedules[selectedMember.id]?.[ds]||null; return v!==s; }).length;
+  }, [pending, selectedMember, schedules]);
+
+  /* ─ 通知リスト（今後10日以内の変更・直近15件まで） ─ */
+  const notifications = useMemo(()=>{
+    return changeLog
+      .filter(c=>{ const d=pd(c.date); return d>=TODAY&&d<=TEN_LATER&&c.from!=="未設定"; })
+      .slice(0, 15);
+  }, [changeLog]);
+
+  /* ─ 一括確定 ─ */
+  const confirmAll = useCallback(async ()=>{
+    if (!selectedMember||pendingCount===0) return;
+    const newSch={...schedules[selectedMember.id]};
+    const logs=[], upserts=[], deletes=[];
+    Object.entries(pending).forEach(([ds,val])=>{
+      const prev=schedules[selectedMember.id]?.[ds]||null;
+      if (val===prev) return;
+      if (val===null){ delete newSch[ds]; deletes.push(ds); }
+      else { newSch[ds]=val; upserts.push({ member_id:selectedMember.id, date:ds, status:val }); }
+      logs.push({ id:Date.now()+Math.random(), memberId:selectedMember.id, memberName:selectedMember.name, date:ds, from:prev||"未設定", to:val||"未設定", changedAt:new Date().toISOString() });
+    });
+    setSchedules(s=>({...s,[selectedMember.id]:newSch}));
+    setChangeLog(l=>[...logs,...l].slice(0,50));
+    setNotifBadge(b=>b+logs.filter(l=>{ const d=pd(l.date); return d>=TODAY&&d<=TEN_LATER&&l.from!=="未設定"; }).length);
+    if (SUPABASE_OK){
+      if (upserts.length>0) await sb.from("schedules").upsert(upserts,{onConflict:"member_id,date"});
+      for (const ds of deletes) await sb.from("schedules").delete().eq("member_id",selectedMember.id).eq("date",ds);
+      if (logs.length>0) await sb.from("change_logs").insert(logs.map(l=>({ member_id:l.memberId, member_name:l.memberName, date:l.date, from_status:l.from, to_status:l.to })));
+    }
+    toast(`${logs.length}件のスケジュールを確定しました`);
+    resetPending();
+  }, [selectedMember, pending, pendingCount, schedules]);
+
+  /* ─ 一覧クイック編集: 保存（通知にも反映） ─ */
+  const saveQuickEdit = useCallback(async (member, dateStr, status)=>{
+    const memberId = member.id;
+    const prev = schedules[memberId]?.[dateStr]||null;
+    if (prev === status) { setQuickEdit(null); return; }
+
+    /* ローカル state 更新 */
+    setSchedules(s=>{ const u={...s}; if(!u[memberId])u[memberId]={}; if(status===null)delete u[memberId][dateStr]; else u[memberId][dateStr]=status; return u; });
+
+    /* 変更ログ登録 → changeLog 先頭に追加（最大50件保持） */
+    const log = { id:Date.now()+Math.random(), memberId, memberName:member.name, date:dateStr, from:prev||"未設定", to:status||"未設定", changedAt:new Date().toISOString() };
+    setChangeLog(l=>[log,...l].slice(0,50));
+
+    /* 通知バッジ：今後10日以内で "変更あり" のものだけカウント */
+    const d=pd(dateStr);
+    if (d>=TODAY && d<=TEN_LATER && prev!==null) setNotifBadge(b=>b+1);
+
+    /* Supabase 保存 */
+    if (SUPABASE_OK){
+      if (status===null) await sb.from("schedules").delete().eq("member_id",memberId).eq("date",dateStr);
+      else await sb.from("schedules").upsert({ member_id:memberId, date:dateStr, status },{ onConflict:"member_id,date" });
+      await sb.from("change_logs").insert({ member_id:memberId, member_name:member.name, date:dateStr, from_status:prev||"未設定", to_status:status||"未設定" });
+    }
+    setQuickEdit(null);
+    toast("保存しました");
+  }, [schedules]);
+
+  /* ─ MEDIUM不在チェック ─ */
+  const absence = useCallback((ds)=>{
+    const vals=members.map(m=>schedules[m.id]?.[ds]).filter(Boolean);
+    if (!vals.length) return { am:false, pm:false };
+    const amOk=vals.some(v=>v==="MEDIUM_ALL"||v==="AM_MEDIUM_PM_OTHER");
+    const pmOk=vals.some(v=>v==="MEDIUM_ALL"||v==="PM_MEDIUM_AM_OTHER");
+    return { am:!amOk, pm:!pmOk };
+  }, [members, schedules]);
+
+  /* ─ 月ナビ ─ */
+  const navMonth=(setter,dir)=>setter(prev=>{ let m=prev.month+dir,y=prev.year; if(m<0){m=11;y--;} if(m>11){m=0;y++;} return {year:y,month:m}; });
+
+  /* ─ メンバー追加 ─ */
+  const addMember=async()=>{
+    if (!newName.trim()) return;
+    const colors=["#0071C5","#2196F3","#00897B","#5C6BC0","#0277BD"];
+    const newM={ name:newName.trim(), color:colors[members.length%colors.length], display_order:members.length+1 };
+    if (SUPABASE_OK){
+      const { data } = await sb.from("members").insert(newM).select().single();
+      if (data){ setMembers(m=>[...m,data]); setSchedules(s=>({...s,[data.id]:{}})); }
+    } else {
+      const m={ id:Date.now(), ...newM };
+      setMembers(prev=>[...prev,m]); setSchedules(s=>({...s,[m.id]:{}}));
+    }
+    setNewName(""); setShowAddMember(false);
+  };
+
+  /* ─ 一覧カレンダー: 当月は今日以降 ─ */
+  const viewDays = useMemo(()=>{
+    const all=mdays(viewMonth.year,viewMonth.month);
+    const isCur=viewMonth.year===TODAY.getFullYear()&&viewMonth.month===TODAY.getMonth();
+    return isCur?all.filter(d=>d>=TODAY):all;
+  }, [viewMonth]);
+
+  const editDays = mdays(editMonth.year, editMonth.month);
+  const getEff=(ds)=>{ if(!selectedMember)return null; if(ds in pending)return pending[ds]; return schedules[selectedMember.id]?.[ds]||null; };
+  const isChanged=(ds)=>{ if(!(ds in pending))return false; return pending[ds]!==(schedules[selectedMember.id]?.[ds]||null); };
+
+  /* ─ ユーザー切り替え ─ */
+  const switchUser = ()=>{
+    localStorage.removeItem("medium_current_user_id");
+    setCurrentUser(null); setSelectedMember(null); resetPending(); setTab("overview");
+  };
+
+  /* ─ ローディング中 ─ */
+  if (appLoading) return (
+    <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#141414", flexDirection:"column", gap:16 }}>
+      <img src="logo.svg" alt="MEDIUM" height={44} style={{ filter:"brightness(0) invert(1)", opacity:0.8 }}/>
+      <p style={{ color:"#8a9ab0", fontSize:14 }}>読み込み中...</p>
+    </div>
+  );
+
+  /* ─ 未ログイン → プロフィール選択 ─ */
+  if (!currentUser) return (
+    <ProfilePicker members={members} onSelect={(m)=>{
+      localStorage.setItem("medium_current_user_id", String(m.id));
+      setCurrentUser(m); setSelectedMember(m);
+    }}/>
+  );
+
+  return (
+    <div style={{ fontFamily:"'Noto Sans JP','Helvetica Neue',sans-serif", minHeight:"100vh", background:"#f7f9fc" }}>
+      <style>{`
+        *{box-sizing:border-box;}
+        ::-webkit-scrollbar{width:6px;height:6px;}
+        ::-webkit-scrollbar-thumb{background:${BRAND_MID};border-radius:3px;}
+        .cell-clickable:hover{background:${BRAND_PALE}!important;cursor:pointer;}
+      `}</style>
+
+      {/* ヘッダー */}
+      <header style={{ background:"#fff", borderBottom:`1px solid ${BRAND_LIGHT}`, padding:"0 16px 0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", height:60, position:"sticky", top:0, zIndex:100 }}>
+        <MediumLogo height={38}/>
+        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+          <Bell count={notifBadge} onClick={()=>{
+            localStorage.setItem("notif_last_seen_at", new Date().toISOString());
+            setNotifBadge(0); setShowNotif(true);
+          }}/>
+          {/* ログイン中ユーザー＋切り替えボタン */}
+          <button onClick={switchUser}
+            title="ユーザーを切り替える"
+            style={{ display:"flex", alignItems:"center", gap:7, background:"none", border:`1px solid ${BRAND_LIGHT}`, borderRadius:24, padding:"4px 12px 4px 4px", cursor:"pointer", fontFamily:"inherit", transition:"border-color 0.15s" }}
+            onMouseEnter={(e)=>e.currentTarget.style.borderColor=BRAND}
+            onMouseLeave={(e)=>e.currentTarget.style.borderColor=BRAND_LIGHT}>
+            <span style={{ width:28, height:28, borderRadius:"50%", background:currentUser.color, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:700, flexShrink:0 }}>{initials(currentUser.name)}</span>
+            <span style={{ fontSize:12, color:"#445", fontWeight:500, whiteSpace:"nowrap" }}>{currentUser.name}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* タブ */}
+      <div style={{ display:"flex", padding:"12px 24px 0", background:"#fff" }}>
+        {[{key:"overview",label:"一覧"},{key:"edit",label:"入力"},{key:"members",label:"メンバー"}].map(t=>(
+          <button key={t.key}
+            onClick={()=>{ setTab(t.key); resetPending(); }}
+            style={{ padding:"10px 20px", border:"none", borderBottom:tab===t.key?`2.5px solid ${BRAND}`:"2.5px solid transparent", background:"none", color:tab===t.key?BRAND:"#8a9ab0", fontWeight:tab===t.key?600:400, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <main style={{ padding:"20px 24px", maxWidth:960, margin:"0 auto", paddingBottom:tab==="edit"&&selectedMember&&pendingCount>0?100:20 }}>
+
+        {/* ══ 一覧タブ ══════════════════════════════════════════ */}
+        {tab==="overview"&&(
+          <div>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+              <button onClick={()=>navMonth(setViewMonth,-1)} style={navBtn}>◀</button>
+              <h2 style={{ margin:0, fontSize:18, fontWeight:600, color:"#1a2a3a" }}>{mLabel(viewMonth.year,viewMonth.month)}</h2>
+              <button onClick={()=>navMonth(setViewMonth,1)} style={navBtn}>▶</button>
+            </div>
+            {monthLoading&&<p style={{ textAlign:"center", color:"#8a9ab0", fontSize:13, marginBottom:12 }}>データ読み込み中...</p>}
+            <div style={{ overflowX:"auto", borderRadius:12, border:`1px solid ${BRAND_LIGHT}`, background:"#fff" }}>
+              <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thS, position:"sticky", left:0, background:"#fff", zIndex:2, minWidth:90 }}>メンバー</th>
+                    {viewDays.map(d=>{
+                      const ds=fmt(d), we=isWE(d), ab=!we?absence(ds):{am:false,pm:false};
+                      const alert=ab.am||ab.pm, aLabel=ab.am&&ab.pm?"終日":ab.am?"AM":"PM";
+                      const isT=ds===fmt(TODAY);
+                      return (
+                        <th key={ds} style={{ ...thS, background:alert?RED_LIGHT:isT?BRAND_LIGHT:we?"#f5f5f5":"#fff", color:alert?RED_ALERT:we?"#bbb":d.getDay()===6?BRAND:"#667", minWidth:40, borderBottom:isT?`2px solid ${BRAND}`:`1px solid ${BRAND_LIGHT}` }}>
+                          <div>{d.getDate()}</div>
+                          <div style={{ fontSize:10, fontWeight:400 }}>{dow(d)}</div>
+                          {alert&&<div style={{ fontSize:7, color:RED_ALERT, marginTop:1, fontWeight:600 }}>⚠{aLabel}</div>}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {members.map(m=>(
+                    <tr key={m.id}>
+                      <td style={{ ...tdS, position:"sticky", left:0, background:"#fff", zIndex:1, textAlign:"left", padding:"8px 6px", whiteSpace:"nowrap" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                          <span style={{ width:24, height:24, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, flexShrink:0 }}>{initials(m.name)}</span>
+                          <span style={{ color:"#1a2a3a", fontWeight:500 }}>{m.name}</span>
+                        </div>
+                      </td>
+                      {viewDays.map(d=>{
+                        const ds=fmt(d), we=isWE(d), val=schedules[m.id]?.[ds], isT=ds===fmt(TODAY);
+                        return (
+                          <td key={ds}
+                          className={!we && currentUser && m.id===currentUser.id?"cell-clickable":""}
+                          onClick={!we && currentUser && m.id===currentUser.id?()=>setQuickEdit({member:m,dateStr:ds}):undefined}
+                            style={{ ...tdS, background:we?"#fafafa":isT?BRAND_PALE:"#fff", verticalAlign:"middle", transition:"background 0.1s" }}>
+                            {!val
+                              ? <span style={{ color:"#ddd" }}>{we?"":"–"}</span>
+                              : val==="MEDIUM_ALL" ? <MediumMark size={13}/>
+                              : <span style={{ color:val==="ABSENT"?RED_ALERT:BRAND, fontWeight:600, fontSize:11 }}>{STATUS_OPTIONS.find(o=>o.key===val)?.short}</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {/* 凡例 */}
+            <div style={{ display:"flex", gap:16, marginTop:14, flexWrap:"wrap", fontSize:12, color:"#667", alignItems:"center" }}>
+              <span style={{ display:"flex", alignItems:"center", gap:5 }}><MediumMark size={14}/> 終日MEDIUM勤務</span>
+              <span><strong style={{ color:BRAND }}>AM</strong> 午前のみMEDIUM勤務</span>
+              <span><strong style={{ color:BRAND }}>PM</strong> 午後のみMEDIUM勤務</span>
+              <span><strong style={{ color:RED_ALERT }}>✖</strong> 不在</span>
+              <span style={{ color:RED_ALERT }}>⚠ MEDIUM不在</span>
+              <span style={{ color:"#8a9ab0" }}>※ セルをタップして直接入力可</span>
+            </div>
+          </div>
+        )}
+
+        {/* ══ 入力タブ ══════════════════════════════════════════ */}
+        {tab==="edit"&&(
+          <div>
+            <div>
+                <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16, padding:"12px 16px", background:BRAND_PALE, borderRadius:10 }}>
+                  <span style={{ width:36, height:36, borderRadius:"50%", background:currentUser.color, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, fontWeight:700 }}>{initials(currentUser.name)}</span>
+                  <span style={{ fontWeight:600, fontSize:15, color:"#1a2a3a" }}>{currentUser.name} のスケジュール編集</span>
+                </div>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14 }}>
+                  <button onClick={()=>{navMonth(setEditMonth,-1);resetPending();}} style={navBtn}>◀</button>
+                  <h3 style={{ margin:0, fontSize:16, fontWeight:600, color:"#1a2a3a" }}>{mLabel(editMonth.year,editMonth.month)}</h3>
+                  <button onClick={()=>{navMonth(setEditMonth,1);resetPending();}} style={navBtn}>▶</button>
+                </div>
+                <p style={{ fontSize:12, color:"#8a9ab0", margin:"0 0 10px", lineHeight:1.5 }}>日付をタップして勤務場所を選択 → 「確定」で一括保存</p>
+                <div style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                  {editDays.map(d=>{
+                    const ds=fmt(d), we=isWE(d);
+                    const past=d<TODAY, over=d>MAX_DATE, disabled=past||over;
+                    const saved=schedules[selectedMember.id]?.[ds]||null;
+                    const eff=getEff(ds), changed=isChanged(ds), isT=ds===fmt(TODAY), isOpen=openDay===ds;
+                    const effOpt=STATUS_OPTIONS.find(o=>o.key===eff);
+                    return (
+                      <div key={ds}>
+                        <div onClick={()=>!disabled&&setOpenDay(isOpen?null:ds)}
+                          style={{ display:"flex", alignItems:"center", gap:8, padding:"10px 12px", background:isOpen?BRAND_LIGHT:changed?"#fffbe6":isT?BRAND_PALE:we?"#fafafa":"#fff", borderRadius:isOpen?"8px 8px 0 0":8, opacity:disabled?0.4:1, border:isOpen?`1.5px solid ${BRAND}`:changed?`1.5px solid #f0c040`:isT?`1px solid ${BRAND_MID}`:`1px solid ${BRAND_LIGHT}`, borderBottom:isOpen?"none":undefined, cursor:disabled?"default":"pointer", userSelect:"none" }}>
+                          <span style={{ width:54, fontSize:13, fontWeight:isT?700:400, color:we?"#bbb":d.getDay()===0?RED_ALERT:d.getDay()===6?BRAND:"#1a2a3a" }}>{d.getDate()}日({dow(d)})</span>
+                          <span style={{ flex:1, fontSize:12, color:eff?(eff==="ABSENT"?RED_ALERT:BRAND):"#bbb", fontWeight:eff?500:400 }}>
+                            {disabled?(past?"過去":"期間外"):eff?effOpt?.label:"未設定"}
+                          </span>
+                          {changed&&!isOpen&&<span style={{ fontSize:9, background:"#f0c040", color:"#6b5200", padding:"2px 6px", borderRadius:4, fontWeight:600 }}>変更あり</span>}
+                          {!disabled&&<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isOpen?BRAND:"#bbb"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform:isOpen?"rotate(180deg)":"none" }}><polyline points="6 9 12 15 18 9"/></svg>}
+                        </div>
+                        {isOpen&&(
+                          <div style={{ padding:"12px 14px 14px", background:"#fff", border:`1.5px solid ${BRAND}`, borderTop:`1px dashed ${BRAND_MID}`, borderRadius:"0 0 8px 8px" }}>
+                            <StatusOpts current={eff} showClear={!!saved}
+                              onSelect={(key)=>{ setPending(p=>({...p,[ds]:key})); setOpenDay(null); }}
+                              onClear={()=>{ setPending(p=>({...p,[ds]:null})); setOpenDay(null); }}/>
+                            {changed&&(
+                              <button onClick={()=>{ setPending(p=>{ const c={...p}; delete c[ds]; return c; }); setOpenDay(null); }}
+                                style={{ marginTop:8, padding:"6px 12px", background:"#f5f5f5", color:"#667", border:"none", borderRadius:8, fontSize:12, cursor:"pointer", fontFamily:"inherit" }}>元に戻す</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                {pendingCount>0&&(
+                  <div style={{ position:"fixed", bottom:0, left:0, right:0, background:"#fff", borderTop:`1px solid ${BRAND_LIGHT}`, padding:"12px 24px", display:"flex", alignItems:"center", justifyContent:"center", gap:12, zIndex:200 }}>
+                    <span style={{ fontSize:13, color:"#556" }}><strong style={{ color:BRAND }}>{pendingCount}件</strong> の変更あり</span>
+                    <button onClick={resetPending} style={{ padding:"9px 16px", background:"#f5f5f5", color:"#667", border:"none", borderRadius:8, fontSize:13, fontWeight:500, cursor:"pointer", fontFamily:"inherit" }}>すべて取消</button>
+                    <button onClick={confirmAll} style={{ padding:"9px 28px", background:BRAND, color:"#fff", border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}>確定</button>
+                  </div>
+                )}
+            </div>
+          </div>
+        )}
+
+        {/* ══ メンバータブ ══════════════════════════════════════ */}
+        {tab==="members"&&(
+          <div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+              <h3 style={{ margin:0, fontSize:16, fontWeight:600, color:"#1a2a3a" }}>メンバー一覧（{members.length}名）</h3>
+              <button onClick={()=>setShowAddMember(true)} style={{ padding:"8px 16px", background:BRAND, color:"#fff", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>+ 追加</button>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {members.map(m=>(
+                <div key={m.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"14px 16px", background:"#fff", borderRadius:10, border:`1px solid ${BRAND_LIGHT}` }}>
+                  <span style={{ width:40, height:40, borderRadius:"50%", background:m.color, color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, fontWeight:700 }}>{initials(m.name)}</span>
+                  <div>
+                    <div style={{ fontWeight:600, color:"#1a2a3a", fontSize:14 }}>{m.name}</div>
+                    <div style={{ fontSize:11, color:"#8a9ab0", marginTop:2 }}>登録済み: {Object.keys(schedules[m.id]||{}).filter(k=>schedules[m.id][k]).length}日</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </main>
+
+      {/* ══ 一覧クイック編集モーダル ════════════════════════════ */}
+      <Modal open={!!quickEdit} onClose={()=>setQuickEdit(null)}
+        title={quickEdit?`${quickEdit.member.name} ／ ${dispDate(quickEdit.dateStr)}`:""} width={360}>
+        {quickEdit&&(
+          <StatusOpts
+            current={schedules[quickEdit.member.id]?.[quickEdit.dateStr]||null}
+            showClear={!!(schedules[quickEdit.member.id]?.[quickEdit.dateStr])}
+            onSelect={(key)=>saveQuickEdit(quickEdit.member, quickEdit.dateStr, key)}
+            onClear={()=>saveQuickEdit(quickEdit.member, quickEdit.dateStr, null)}/>
+        )}
+      </Modal>
+
+      {/* ══ 先々月以前の読み込み確認 ═══════════════════════════ */}
+      <Modal open={!!confirmLoad} onClose={()=>setConfirmLoad(null)} title="過去データの読み込み" width={380}>
+        {confirmLoad&&(
+          <div>
+            <p style={{ color:"#445", fontSize:14, lineHeight:1.7, marginBottom:20 }}>
+              <strong>{mLabel(confirmLoad.year,confirmLoad.month)}</strong> のデータを読み込みますか？<br/>
+              <span style={{ color:"#8a9ab0", fontSize:12 }}>先々月以前のデータは手動で読み込みます。</span>
+            </p>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setConfirmLoad(null)} style={{ flex:1, padding:"10px 0", background:"#f5f5f5", color:"#667", border:"none", borderRadius:8, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>キャンセル</button>
+              <button onClick={()=>{ loadMonthData(confirmLoad.year,confirmLoad.month); setConfirmLoad(null); }}
+                style={{ flex:1, padding:"10px 0", background:BRAND, color:"#fff", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>読み込む</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ══ 通知モーダル ════════════════════════════════════════ */}
+      <Modal open={showNotif} onClose={()=>setShowNotif(false)} title={`通知（今後10日間 ${notifications.length}件）`} width={500}>
+        {notifications.length===0
+          ? <p style={{ color:"#8a9ab0", textAlign:"center", padding:20, fontSize:14 }}>今後10日以内の変更通知はありません</p>
+          : <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {notifications.map(n=>(
+                <div key={n.id} style={{ padding:"12px 14px", borderRadius:8, background:BRAND_PALE, border:`1px solid ${BRAND_LIGHT}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <span style={{ fontWeight:600, fontSize:13, color:"#1a2a3a" }}>{n.memberName}</span>
+                    <span style={{ fontSize:11, color:"#8a9ab0" }}>{dispDate(n.date)}</span>
+                  </div>
+                  <div style={{ fontSize:12, color:"#556", marginTop:4 }}>
+                    {STATUS_OPTIONS.find(o=>o.key===n.from)?.label||n.from} → <strong style={{ color:BRAND }}>{STATUS_OPTIONS.find(o=>o.key===n.to)?.label||n.to}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>}
+      </Modal>
+
+      {/* ══ メンバー追加モーダル ════════════════════════════════ */}
+      <Modal open={showAddMember} onClose={()=>setShowAddMember(false)} title="メンバー追加" width={380}>
+        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          <input value={newName} onChange={e=>setNewName(e.target.value)} placeholder="氏名を入力"
+            onKeyDown={e=>e.key==="Enter"&&addMember()}
+            style={{ padding:"10px 14px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:14, fontFamily:"inherit", outline:"none" }}/>
+          <button onClick={addMember} disabled={!newName.trim()}
+            style={{ padding:"10px 0", background:newName.trim()?BRAND:"#ccc", color:"#fff", border:"none", borderRadius:8, fontSize:14, fontWeight:600, cursor:newName.trim()?"pointer":"not-allowed", fontFamily:"inherit" }}>
+            追加する
+          </button>
+        </div>
+      </Modal>
+
+      <Toast message={toastMsg} visible={toastVis}/>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+    </script>
+  </body>
+</html>

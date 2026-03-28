@@ -17,7 +17,7 @@
   <body>
     <div id="root"></div>
     <script type="text/babel">
-const { useState, useMemo, useCallback, useEffect } = React;
+const { useState, useMemo, useCallback, useEffect, useRef } = React;
 
 /* ══ Supabase 設定 ══════════════════════════════════════════
    Supabase プロジェクトの URL と anon key に書き換えてください  */
@@ -434,12 +434,27 @@ function App(){
     setNewName(""); setShowAddMember(false);
   };
 
-  /* ─ 一覧カレンダー: 当月は今日以降 ─ */
+  /* ─ 一覧カレンダー: 全日表示 ─ */
   const viewDays = useMemo(()=>{
-    const all=mdays(viewMonth.year,viewMonth.month);
-    const isCur=viewMonth.year===TODAY.getFullYear()&&viewMonth.month===TODAY.getMonth();
-    return isCur?all.filter(d=>d>=TODAY):all;
+    return mdays(viewMonth.year,viewMonth.month);
   }, [viewMonth]);
+
+  const tableScrollRef = useRef(null);
+  const todayThRef     = useRef(null);
+
+  /* 当月表示時、今日の列にスクロール */
+  useEffect(()=>{
+    const isCur = viewMonth.year===TODAY.getFullYear()&&viewMonth.month===TODAY.getMonth();
+    if (!isCur) return;
+    const timer = setTimeout(()=>{
+      if (!tableScrollRef.current||!todayThRef.current) return;
+      const container = tableScrollRef.current;
+      const th = todayThRef.current;
+      const left = th.offsetLeft - container.offsetWidth/2 + th.offsetWidth/2;
+      container.scrollLeft = Math.max(0, left);
+    }, 50);
+    return ()=>clearTimeout(timer);
+  }, [viewMonth, members]);
 
   const editDays = mdays(editMonth.year, editMonth.month);
   const getEff=(ds)=>{ if(!selectedMember)return null; if(ds in pending)return pending[ds]; return schedules[selectedMember.id]?.[ds]||null; };
@@ -518,7 +533,7 @@ function App(){
               <button onClick={()=>navMonth(setViewMonth,1)} style={navBtn}>▶</button>
             </div>
             {monthLoading&&<p style={{ textAlign:"center", color:"#8a9ab0", fontSize:13, marginBottom:12 }}>データ読み込み中...</p>}
-            <div style={{ overflowX:"auto", borderRadius:12, border:`1px solid ${BRAND_LIGHT}`, background:"#fff" }}>
+            <div ref={tableScrollRef} style={{ overflowX:"auto", borderRadius:12, border:`1px solid ${BRAND_LIGHT}`, background:"#fff" }}>
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                 <thead>
                   <tr>
@@ -528,7 +543,7 @@ function App(){
                       const alert=ab.am||ab.pm, aLabel=ab.am&&ab.pm?"終日":ab.am?"AM":"PM";
                       const isT=ds===fmt(TODAY);
                       return (
-                        <th key={ds} style={{ ...thS, background:alert?RED_LIGHT:isT?BRAND_LIGHT:we?"#f5f5f5":"#fff", color:alert?RED_ALERT:we?"#bbb":d.getDay()===6?BRAND:"#667", minWidth:40, borderBottom:isT?`2px solid ${BRAND}`:`1px solid ${BRAND_LIGHT}` }}>
+                        <th key={ds} ref={isT?todayThRef:null} style={{ ...thS, background:alert?RED_LIGHT:isT?BRAND_LIGHT:we?"#f5f5f5":"#fff", color:alert?RED_ALERT:we?"#bbb":d.getDay()===6?BRAND:"#667", minWidth:40, borderBottom:isT?`2px solid ${BRAND}`:`1px solid ${BRAND_LIGHT}` }}>
                           <div>{d.getDate()}</div>
                           <div style={{ fontSize:10, fontWeight:400 }}>{dow(d)}</div>
                           {alert&&<div style={{ fontSize:7, color:RED_ALERT, marginTop:1, fontWeight:600 }}>⚠{aLabel}</div>}

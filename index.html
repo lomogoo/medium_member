@@ -442,16 +442,20 @@ function App(){
   const tableScrollRef = useRef(null);
   const todayThRef     = useRef(null);
 
-  /* 当月表示時、今日の列にスクロール */
+  /* 月移動時のスクロール: 当月は今日を中央表示、他月は1日を左端表示 */
   useEffect(()=>{
     const isCur = viewMonth.year===TODAY.getFullYear()&&viewMonth.month===TODAY.getMonth();
-    if (!isCur) return;
     const timer = setTimeout(()=>{
-      if (!tableScrollRef.current||!todayThRef.current) return;
+      if (!tableScrollRef.current) return;
       const container = tableScrollRef.current;
-      const th = todayThRef.current;
-      const left = th.offsetLeft - container.offsetWidth/2 + th.offsetWidth/2;
-      container.scrollLeft = Math.max(0, left);
+      if (isCur) {
+        if (!todayThRef.current) return;
+        const th = todayThRef.current;
+        const left = th.offsetLeft - container.offsetWidth/2 + th.offsetWidth/2;
+        container.scrollLeft = Math.max(0, left);
+      } else {
+        container.scrollLeft = 0;
+      }
     }, 50);
     return ()=>clearTimeout(timer);
   }, [viewMonth, members]);

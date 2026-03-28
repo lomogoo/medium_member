@@ -534,7 +534,18 @@ function App(){
             <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
               <button onClick={()=>navMonth(setViewMonth,-1)} style={navBtn}>◀</button>
               <h2 style={{ margin:0, fontSize:18, fontWeight:600, color:"#1a2a3a" }}>{mLabel(viewMonth.year,viewMonth.month)}</h2>
-              <button onClick={()=>navMonth(setViewMonth,1)} style={navBtn}>▶</button>
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                <button onClick={()=>{
+                  const isCur=viewMonth.year===TODAY.getFullYear()&&viewMonth.month===TODAY.getMonth();
+                  setViewMonth({year:TODAY.getFullYear(),month:TODAY.getMonth()});
+                  if(isCur){setTimeout(()=>{
+                    if(!tableScrollRef.current||!todayThRef.current)return;
+                    const c=tableScrollRef.current,th=todayThRef.current;
+                    c.scrollLeft=Math.max(0,th.offsetLeft-c.offsetWidth/2+th.offsetWidth/2);
+                  },50);}
+                }} style={{ background:BRAND, border:`1px solid ${BRAND}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", color:"#fff", fontSize:13, fontFamily:"inherit", fontWeight:600 }}>今日</button>
+                <button onClick={()=>navMonth(setViewMonth,1)} style={navBtn}>▶</button>
+              </div>
             </div>
             {monthLoading&&<p style={{ textAlign:"center", color:"#8a9ab0", fontSize:13, marginBottom:12 }}>データ読み込み中...</p>}
             <div ref={tableScrollRef} style={{ overflowX:"auto", borderRadius:12, border:`1px solid ${BRAND_LIGHT}`, background:"#fff" }}>

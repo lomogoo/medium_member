@@ -761,5 +761,16 @@ function App(){
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
     </script>
+    <script>
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/medium_member/sw.js", { scope: "/medium_member/" })
+          .then((reg) => {
+            // 新しいSWがアクティブになったらページをリロード
+            navigator.serviceWorker.addEventListener("controllerchange", () => {
+              window.location.reload();
+            });
+          });
+      }
+    </script>
   </body>
 </html>

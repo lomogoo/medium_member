@@ -2,7 +2,8 @@
   "name": "勤務場所管理",
   "short_name": "勤務管理",
   "display": "standalone",
-  "start_url": "/",
+  "scope": "/medium_member/",
+  "start_url": "/medium_member/",
   "background_color": "#ffffff",
   "theme_color": "#0071C5",
   "icons": [

@@ -280,8 +280,8 @@ function App(){
     setMonthLoading(false);
   }, []);
 
-  /* ─ Supabase: 通知データ読み込み＆バッジ計算（端末ごとの既読を localStorage で管理） ─ */
-  const loadNotifData = useCallback(async ()=>{
+  /* ─ Supabase: 通知データ読み込み＆バッジ計算（既読時刻を members テーブルで管理） ─ */
+  const loadNotifData = useCallback(async (lastSeen)=>{
     if (!SUPABASE_OK) return;
     const todayStr    = fmt(TODAY);
     const tenLaterStr = fmt(daysLater(10));
@@ -302,8 +302,7 @@ function App(){
       changedAt: r.changed_at,
     }));
     setChangeLog(logs);
-    /* この端末が最後に通知を確認した時刻（localStorage）より新しいものだけバッジに */
-    const lastSeen = localStorage.getItem("notif_last_seen_at");
+    /* ログインユーザーの notif_last_seen_at より新しいものだけバッジに */
     const unread = lastSeen
       ? logs.filter(l => l.changedAt > lastSeen && l.from !== "未設定")
       : logs.filter(l => l.from !== "未設定");
@@ -318,13 +317,11 @@ function App(){
     if (members.length===0) return;
     const key = mkey(TODAY.getFullYear(), TODAY.getMonth());
     if (!loadedMonths.has(key)) loadMonthData(TODAY.getFullYear(), TODAY.getMonth());
-    loadNotifData();
-    /* localStorage からログインユーザーを復元 */
+    /* localStorage からログインユーザーを復元し、そのユーザーの notif_last_seen_at を渡す */
     const savedId = localStorage.getItem("medium_current_user_id");
-    if (savedId){
-      const m = members.find(mem => String(mem.id) === savedId);
-      if (m){ setCurrentUser(m); setSelectedMember(m); }
-    }
+    const savedUser = savedId ? members.find(mem => String(mem.id) === savedId) : null;
+    loadNotifData(savedUser?.notif_last_seen_at || null);
+    if (savedUser){ setCurrentUser(savedUser); setSelectedMember(savedUser); }
   }, [members]);
 
   /* ─ viewMonth 変更時: 必要なら月データを読み込む ─ */
@@ -506,7 +503,12 @@ function App(){
         <MediumLogo height={38}/>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
           <Bell count={notifBadge} onClick={()=>{
-            localStorage.setItem("notif_last_seen_at", new Date().toISOString());
+            const now = new Date().toISOString();
+            if (SUPABASE_OK && currentUser) {
+              sb.from("members").update({ notif_last_seen_at: now }).eq("id", currentUser.id);
+              setCurrentUser(u=>({ ...u, notif_last_seen_at: now }));
+              setMembers(ms=>ms.map(m=>m.id===currentUser.id ? { ...m, notif_last_seen_at: now } : m));
+            }
             setNotifBadge(0); setShowNotif(true);
           }}/>
           {/* ログイン中ユーザー＋切り替えボタン */}

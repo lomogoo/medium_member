@@ -46,8 +46,8 @@ const GREEN_OK    = "#27ae60";
 /* ══ マスターデータ ═════════════════════════════════════════ */
 const STATUS_OPTIONS = [
   { key: "MEDIUM_ALL",         label: "終日MEDIUM勤務",    short: "LOGO" },
-  { key: "AM_MEDIUM_PM_OTHER", label: "午前のみMEDIUM勤務", short: "AM"   },
-  { key: "PM_MEDIUM_AM_OTHER", label: "午後のみMEDIUM勤務", short: "PM"   },
+  { key: "AM_MEDIUM_PM_OTHER", label: "AM　MEDIUM勤務", short: "AM"   },
+  { key: "PM_MEDIUM_AM_OTHER", label: "PM　MEDIUM勤務", short: "PM"   },
   { key: "ABSENT",             label: "不在",              short: "✖"    },
 ];
 
@@ -606,8 +606,8 @@ function App(){
             {/* 凡例 */}
             <div style={{ display:"flex", gap:16, marginTop:14, flexWrap:"wrap", fontSize:12, color:"#667", alignItems:"center" }}>
               <span style={{ display:"flex", alignItems:"center", gap:5 }}><MediumMark size={14}/> 終日MEDIUM勤務</span>
-              <span><strong style={{ color:BRAND }}>AM</strong> 午前のみMEDIUM勤務</span>
-              <span><strong style={{ color:BRAND }}>PM</strong> 午後のみMEDIUM勤務</span>
+              <span><strong style={{ color:BRAND }}>AM</strong> AM　MEDIUM勤務</span>
+              <span><strong style={{ color:BRAND }}>PM</strong> PM　MEDIUM勤務</span>
               <span><strong style={{ color:RED_ALERT }}>✖</strong> 不在</span>
               <span style={{ color:RED_ALERT }}>⚠ MEDIUM不在</span>
               <span style={{ color:"#8a9ab0" }}>※ セルをタップして直接入力可</span>

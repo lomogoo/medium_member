@@ -1,4 +1,4 @@
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const CACHE_NAME = `medium-member-${CACHE_VERSION}`;
 const ASSETS = [
   "/medium_member/",

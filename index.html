@@ -77,6 +77,10 @@ function dispDate(ds){ const d=pd(ds); return `${d.getMonth()+1}/${d.getDate()}(
 function mkey(y,m){ return `${y}-${m}`; }
 /* 先々月（2ヶ月前）以前 → 要確認 */
 function isFarPast(y,m){ return y*12+m <= TODAY.getFullYear()*12+TODAY.getMonth()-2; }
+/* 一時不在: "HH:MM" → 分数 */
+function toMinutes(t){ const [h,m]=t.split(":").map(Number); return h*60+m; }
+/* 一時不在: 分数 → "HH:MM" */
+function toTimeStr(m){ return `${String(Math.floor(m/60)).padStart(2,"0")}:${String(m%60).padStart(2,"0")}`; }
 
 /* ══ ロゴ ════════════════════════════════════════════════= */
 /* ヘッダー用：フルロゴ（高さ指定） */
@@ -141,13 +145,22 @@ function Toast({ message, visible }){
   );
 }
 
-function StatusOpts({ current, onSelect, onClear, showClear }){
+function StatusOpts({ current, onApply, onClear, showClear }){
+  const [selStatus, setSelStatus] = useState(current?.status || null);
+  const [gaps, setGaps] = useState(current?.gaps || []);
+
+  const addGap    = () => setGaps(g=>[...g,{start:"12:00",end:"13:00"}]);
+  const removeGap = i  => setGaps(g=>g.filter((_,idx)=>idx!==i));
+  const updateGap = (i,field,val) => setGaps(g=>g.map((gap,idx)=>idx===i?{...gap,[field]:val}:gap));
+
+  const canHaveGaps = selStatus && selStatus !== "ABSENT";
+
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
       {STATUS_OPTIONS.map((opt)=>{
-        const sel=current===opt.key;
+        const sel=selStatus===opt.key;
         return (
-          <button key={opt.key} onClick={()=>onSelect(opt.key)}
+          <button key={opt.key} onClick={()=>setSelStatus(opt.key)}
             style={{ display:"flex", alignItems:"center", gap:10, padding:"9px 12px", borderRadius:8, border:sel?`1.5px solid ${BRAND}`:`1px solid #dde4ee`, background:sel?`${BRAND}10`:"#fff", cursor:"pointer", fontFamily:"inherit", fontSize:13, color:sel?BRAND:"#445", fontWeight:sel?600:400 }}>
             <span style={{ width:18, height:18, borderRadius:"50%", border:sel?`5px solid ${BRAND}`:`2px solid #ccc`, background:"#fff", flexShrink:0 }}/>
             {opt.key==="MEDIUM_ALL"
@@ -156,6 +169,32 @@ function StatusOpts({ current, onSelect, onClear, showClear }){
           </button>
         );
       })}
+      {canHaveGaps&&(
+        <div style={{ marginTop:8, padding:"10px 12px", background:"#f8f9fb", borderRadius:8, border:"1px solid #eef1f6" }}>
+          <div style={{ fontSize:12, fontWeight:600, color:"#556", marginBottom:8 }}>一時不在時間帯</div>
+          {gaps.map((gap,i)=>(
+            <div key={i} style={{ display:"flex", alignItems:"center", gap:6, marginBottom:6 }}>
+              <input type="time" value={gap.start} onChange={e=>updateGap(i,"start",e.target.value)}
+                style={{ flex:1, border:"1px solid #dde4ee", borderRadius:6, padding:"5px 8px", fontSize:13, fontFamily:"inherit" }}/>
+              <span style={{ color:"#8a9ab0", fontSize:12, flexShrink:0 }}>〜</span>
+              <input type="time" value={gap.end} onChange={e=>updateGap(i,"end",e.target.value)}
+                style={{ flex:1, border:"1px solid #dde4ee", borderRadius:6, padding:"5px 8px", fontSize:13, fontFamily:"inherit" }}/>
+              <button onClick={()=>removeGap(i)}
+                style={{ background:"none", border:"none", color:RED_ALERT, cursor:"pointer", fontSize:16, padding:"0 4px", lineHeight:1, flexShrink:0 }}>✕</button>
+            </div>
+          ))}
+          <button onClick={addGap}
+            style={{ fontSize:12, color:BRAND, background:"none", border:`1px dashed ${BRAND_MID}`, borderRadius:6, padding:"5px 12px", cursor:"pointer", fontFamily:"inherit", width:"100%", marginTop:gaps.length>0?4:0 }}>
+            ＋ 一時不在を追加
+          </button>
+        </div>
+      )}
+      {selStatus&&(
+        <button onClick={()=>onApply({ status:selStatus, gaps:canHaveGaps?gaps:[] })}
+          style={{ marginTop:4, padding:"9px 12px", background:BRAND, color:"#fff", border:"none", borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+          適用
+        </button>
+      )}
       {showClear&&(
         <button onClick={onClear} style={{ marginTop:4, padding:"7px 12px", background:"#fff", color:RED_ALERT, border:`1px solid ${RED_ALERT}33`, borderRadius:8, fontSize:12, fontWeight:500, cursor:"pointer", fontFamily:"inherit", alignSelf:"flex-start" }}>クリア（未設定に戻す）</button>
       )}
@@ -264,13 +303,13 @@ function App(){
     const last  = new Date(year, month+1, 0).getDate();
     const end   = `${year}-${String(month+1).padStart(2,"0")}-${String(last).padStart(2,"0")}`;
     if (SUPABASE_OK){
-      const { data } = await sb.from("schedules").select("member_id,date,status").gte("date",start).lte("date",end);
+      const { data } = await sb.from("schedules").select("member_id,date,status,gaps").gte("date",start).lte("date",end);
       if (data){
         setSchedules(prev=>{
           const u={...prev};
           data.forEach(r=>{
             if (!u[r.member_id]) u[r.member_id]={};
-            u[r.member_id][r.date]=r.status;
+            u[r.member_id][r.date]={ status:r.status, gaps:r.gaps||[] };
           });
           return u;
         });
@@ -349,7 +388,12 @@ function App(){
   const resetPending = ()=>{ setPending({}); setOpenDay(null); };
   const pendingCount = useMemo(()=>{
     if (!selectedMember) return 0;
-    return Object.entries(pending).filter(([ds,v])=>{ const s=schedules[selectedMember.id]?.[ds]||null; return v!==s; }).length;
+    return Object.entries(pending).filter(([ds,v])=>{
+      const s=schedules[selectedMember.id]?.[ds]||null;
+      if (v===null&&s===null) return false;
+      if (v===null||s===null) return true;
+      return v.status!==s.status||JSON.stringify(v.gaps)!==JSON.stringify(s.gaps);
+    }).length;
   }, [pending, selectedMember, schedules]);
 
   /* ─ 通知リスト（今後10日以内の変更・直近15件まで） ─ */
@@ -365,11 +409,14 @@ function App(){
     const newSch={...schedules[selectedMember.id]};
     const logs=[], upserts=[], deletes=[];
     Object.entries(pending).forEach(([ds,val])=>{
-      const prev=schedules[selectedMember.id]?.[ds]||null;
-      if (val===prev) return;
+      const prevEntry=schedules[selectedMember.id]?.[ds]||null;
+      const prevStatus=prevEntry?.status||null;
+      const unchanged=val===null&&prevEntry===null
+        ||(val!==null&&prevEntry!==null&&val.status===prevEntry.status&&JSON.stringify(val.gaps)===JSON.stringify(prevEntry.gaps));
+      if (unchanged) return;
       if (val===null){ delete newSch[ds]; deletes.push(ds); }
-      else { newSch[ds]=val; upserts.push({ member_id:selectedMember.id, date:ds, status:val }); }
-      logs.push({ id:Date.now()+Math.random(), memberId:selectedMember.id, memberName:selectedMember.name, date:ds, from:prev||"未設定", to:val||"未設定", changedAt:new Date().toISOString() });
+      else { newSch[ds]=val; upserts.push({ member_id:selectedMember.id, date:ds, status:val.status, gaps:val.gaps }); }
+      logs.push({ id:Date.now()+Math.random(), memberId:selectedMember.id, memberName:selectedMember.name, date:ds, from:prevStatus||"未設定", to:val?.status||"未設定", changedAt:new Date().toISOString() });
     });
     setSchedules(s=>({...s,[selectedMember.id]:newSch}));
     setChangeLog(l=>[...logs,...l].slice(0,50));
@@ -384,39 +431,67 @@ function App(){
   }, [selectedMember, pending, pendingCount, schedules]);
 
   /* ─ 一覧クイック編集: 保存（通知にも反映） ─ */
-  const saveQuickEdit = useCallback(async (member, dateStr, status)=>{
+  const saveQuickEdit = useCallback(async (member, dateStr, schedVal)=>{
     const memberId = member.id;
-    const prev = schedules[memberId]?.[dateStr]||null;
-    if (prev === status) { setQuickEdit(null); return; }
+    const prevEntry = schedules[memberId]?.[dateStr]||null;
+    const prevStatus = prevEntry?.status||null;
+    const noChange = schedVal===null&&prevEntry===null
+      ||(schedVal!==null&&prevEntry!==null&&schedVal.status===prevEntry.status&&JSON.stringify(schedVal.gaps)===JSON.stringify(prevEntry.gaps));
+    if (noChange) { setQuickEdit(null); return; }
 
     /* ローカル state 更新 */
-    setSchedules(s=>{ const u={...s}; if(!u[memberId])u[memberId]={}; if(status===null)delete u[memberId][dateStr]; else u[memberId][dateStr]=status; return u; });
+    setSchedules(s=>{ const u={...s}; if(!u[memberId])u[memberId]={}; if(schedVal===null)delete u[memberId][dateStr]; else u[memberId][dateStr]=schedVal; return u; });
 
     /* 変更ログ登録 → changeLog 先頭に追加（最大50件保持） */
-    const log = { id:Date.now()+Math.random(), memberId, memberName:member.name, date:dateStr, from:prev||"未設定", to:status||"未設定", changedAt:new Date().toISOString() };
+    const log = { id:Date.now()+Math.random(), memberId, memberName:member.name, date:dateStr, from:prevStatus||"未設定", to:schedVal?.status||"未設定", changedAt:new Date().toISOString() };
     setChangeLog(l=>[log,...l].slice(0,50));
 
     /* 通知バッジ：今後10日以内で "変更あり" のものだけカウント */
     const d=pd(dateStr);
-    if (d>=TODAY && d<=TEN_LATER && prev!==null) setNotifBadge(b=>b+1);
+    if (d>=TODAY && d<=TEN_LATER && prevStatus!==null) setNotifBadge(b=>b+1);
 
     /* Supabase 保存 */
     if (SUPABASE_OK){
-      if (status===null) await sb.from("schedules").delete().eq("member_id",memberId).eq("date",dateStr);
-      else await sb.from("schedules").upsert({ member_id:memberId, date:dateStr, status },{ onConflict:"member_id,date" });
-      await sb.from("change_logs").insert({ member_id:memberId, member_name:member.name, date:dateStr, from_status:prev||"未設定", to_status:status||"未設定" });
+      if (schedVal===null) await sb.from("schedules").delete().eq("member_id",memberId).eq("date",dateStr);
+      else await sb.from("schedules").upsert({ member_id:memberId, date:dateStr, status:schedVal.status, gaps:schedVal.gaps },{ onConflict:"member_id,date" });
+      await sb.from("change_logs").insert({ member_id:memberId, member_name:member.name, date:dateStr, from_status:prevStatus||"未設定", to_status:schedVal?.status||"未設定" });
     }
     setQuickEdit(null);
     toast("保存しました");
   }, [schedules]);
 
-  /* ─ MEDIUM不在チェック ─ */
+  /* ─ MEDIUM不在チェック（1分単位スロット） ─ */
   const absence = useCallback((ds)=>{
-    const vals=members.map(m=>schedules[m.id]?.[ds]).filter(Boolean);
-    if (!vals.length) return { am:false, pm:false };
-    const amOk=vals.some(v=>v==="MEDIUM_ALL"||v==="AM_MEDIUM_PM_OTHER");
-    const pmOk=vals.some(v=>v==="MEDIUM_ALL"||v==="PM_MEDIUM_AM_OTHER");
-    return { am:!amOk, pm:!pmOk };
+    const hasAny=members.some(m=>schedules[m.id]?.[ds]);
+    if (!hasAny) return { am:false, pm:false, intervals:[] };
+    const WORK_START=9*60, WORK_END=18*60, TOTAL=WORK_END-WORK_START;
+    const STATUS_RANGE={
+      MEDIUM_ALL:[WORK_START,WORK_END],
+      AM_MEDIUM_PM_OTHER:[WORK_START,12*60],
+      PM_MEDIUM_AM_OTHER:[12*60,WORK_END],
+    };
+    const presence=new Array(TOTAL).fill(0);
+    members.forEach(m=>{
+      const entry=schedules[m.id]?.[ds];
+      if (!entry) return;
+      const status=entry.status||entry;
+      const gaps=entry.gaps||[];
+      const range=STATUS_RANGE[status];
+      if (!range) return;
+      for (let min=range[0];min<range[1];min++){
+        const inGap=gaps.some(g=>min>=toMinutes(g.start)&&min<toMinutes(g.end));
+        if (!inGap) presence[min-WORK_START]=1;
+      }
+    });
+    const amOk=presence.slice(0,3*60).some(v=>v===1);
+    const pmOk=presence.slice(3*60).some(v=>v===1);
+    const intervals=[];
+    let s=-1;
+    for (let i=0;i<=TOTAL;i++){
+      if (i<TOTAL&&presence[i]===0){ if(s===-1)s=i; }
+      else { if(s!==-1){ intervals.push({start:toTimeStr(WORK_START+s),end:toTimeStr(WORK_START+i)}); s=-1; } }
+    }
+    return { am:!amOk, pm:!pmOk, intervals };
   }, [members, schedules]);
 
   /* ─ 月ナビ ─ */
@@ -465,7 +540,13 @@ function App(){
 
   const editDays = mdays(editMonth.year, editMonth.month);
   const getEff=(ds)=>{ if(!selectedMember)return null; if(ds in pending)return pending[ds]; return schedules[selectedMember.id]?.[ds]||null; };
-  const isChanged=(ds)=>{ if(!(ds in pending))return false; return pending[ds]!==(schedules[selectedMember.id]?.[ds]||null); };
+  const isChanged=(ds)=>{
+    if(!(ds in pending))return false;
+    const pval=pending[ds], sval=schedules[selectedMember.id]?.[ds]||null;
+    if(pval===null&&sval===null)return false;
+    if(pval===null||sval===null)return true;
+    return pval.status!==sval.status||JSON.stringify(pval.gaps)!==JSON.stringify(sval.gaps);
+  };
 
   /* ─ ユーザー切り替え ─ */
   const switchUser = ()=>{
@@ -502,10 +583,10 @@ function App(){
       <header style={{ background:"#fff", borderBottom:`1px solid ${BRAND_LIGHT}`, padding:"0 16px 0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", height:60, position:"sticky", top:0, zIndex:100 }}>
         <MediumLogo height={38}/>
         <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-          <Bell count={notifBadge} onClick={()=>{
+          <Bell count={notifBadge} onClick={async ()=>{
             const now = new Date().toISOString();
             if (SUPABASE_OK && currentUser) {
-              sb.from("members").update({ notif_last_seen_at: now }).eq("id", currentUser.id);
+              await sb.from("members").update({ notif_last_seen_at: now }).eq("id", currentUser.id);
               setCurrentUser(u=>({ ...u, notif_last_seen_at: now }));
               setMembers(ms=>ms.map(m=>m.id===currentUser.id ? { ...m, notif_last_seen_at: now } : m));
             }
@@ -562,8 +643,10 @@ function App(){
                   <tr>
                     <th style={{ ...thS, position:"sticky", left:0, background:"#fff", zIndex:2, minWidth:90 }}>メンバー</th>
                     {viewDays.map(d=>{
-                      const ds=fmt(d), we=isWE(d), ab=!we?absence(ds):{am:false,pm:false};
-                      const alert=ab.am||ab.pm, aLabel=ab.am&&ab.pm?"終日":ab.am?"AM":"PM";
+                      const ds=fmt(d), we=isWE(d), ab=!we?absence(ds):{am:false,pm:false,intervals:[]};
+                      const gapOnly=!ab.am&&!ab.pm&&ab.intervals?.length>0;
+                      const alert=ab.am||ab.pm||gapOnly;
+                      const aLabel=ab.am&&ab.pm?"終日":ab.am?"AM":ab.pm?"PM":gapOnly?ab.intervals[0].start:"";
                       const isT=ds===fmt(TODAY);
                       return (
                         <th key={ds} ref={isT?todayThRef:null} style={{ ...thS, background:alert?RED_LIGHT:isT?BRAND_LIGHT:we?"#f5f5f5":"#fff", color:alert?RED_ALERT:we?"#bbb":d.getDay()===6?BRAND:"#667", minWidth:40, borderBottom:isT?`2px solid ${BRAND}`:`1px solid ${BRAND_LIGHT}` }}>
@@ -585,16 +668,21 @@ function App(){
                         </div>
                       </td>
                       {viewDays.map(d=>{
-                        const ds=fmt(d), we=isWE(d), val=schedules[m.id]?.[ds], isT=ds===fmt(TODAY);
+                        const ds=fmt(d), we=isWE(d), entry=schedules[m.id]?.[ds], isT=ds===fmt(TODAY);
+                        const statusVal=entry?.status||null;
                         return (
                           <td key={ds}
                           className={!we && currentUser && m.id===currentUser.id?"cell-clickable":""}
                           onClick={!we && currentUser && m.id===currentUser.id?()=>setQuickEdit({member:m,dateStr:ds}):undefined}
                             style={{ ...tdS, background:we?"#fafafa":isT?BRAND_PALE:"#fff", verticalAlign:"middle", transition:"background 0.1s" }}>
-                            {!val
+                            {!entry
                               ? <span style={{ color:"#ddd" }}>{we?"":"–"}</span>
-                              : val==="MEDIUM_ALL" ? <MediumMark size={13}/>
-                              : <span style={{ color:val==="ABSENT"?RED_ALERT:BRAND, fontWeight:600, fontSize:11 }}>{STATUS_OPTIONS.find(o=>o.key===val)?.short}</span>}
+                              : <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:1, lineHeight:1.2 }}>
+                                  {statusVal==="MEDIUM_ALL"
+                                    ? <MediumMark size={13}/>
+                                    : <span style={{ color:statusVal==="ABSENT"?RED_ALERT:BRAND, fontWeight:600, fontSize:11 }}>{STATUS_OPTIONS.find(o=>o.key===statusVal)?.short}</span>}
+                                  {entry.gaps?.length>0&&<span style={{ color:RED_ALERT, fontSize:8, fontWeight:700 }}>一時不在</span>}
+                                </div>}
                           </td>
                         );
                       })}
@@ -610,6 +698,7 @@ function App(){
               <span><strong style={{ color:BRAND }}>PM</strong> PM　MEDIUM勤務</span>
               <span><strong style={{ color:RED_ALERT }}>✖</strong> 不在</span>
               <span style={{ color:RED_ALERT }}>⚠ MEDIUM不在</span>
+              <span style={{ color:RED_ALERT, fontSize:11, fontWeight:700 }}>一時不在</span><span style={{ color:"#667" }}> 一時不在あり</span>
               <span style={{ color:"#8a9ab0" }}>※ セルをタップして直接入力可</span>
             </div>
           </div>
@@ -634,7 +723,8 @@ function App(){
                     const ds=fmt(d), we=isWE(d);
                     const past=d<TODAY, over=d>MAX_DATE, disabled=past||over;
                     const saved=schedules[selectedMember.id]?.[ds]||null;
-                    const eff=getEff(ds), changed=isChanged(ds), isT=ds===fmt(TODAY), isOpen=openDay===ds;
+                    const effData=getEff(ds), changed=isChanged(ds), isT=ds===fmt(TODAY), isOpen=openDay===ds;
+                    const eff=effData?.status||null;
                     const effOpt=STATUS_OPTIONS.find(o=>o.key===eff);
                     return (
                       <div key={ds}>
@@ -649,8 +739,8 @@ function App(){
                         </div>
                         {isOpen&&(
                           <div style={{ padding:"12px 14px 14px", background:"#fff", border:`1.5px solid ${BRAND}`, borderTop:`1px dashed ${BRAND_MID}`, borderRadius:"0 0 8px 8px" }}>
-                            <StatusOpts current={eff} showClear={!!saved}
-                              onSelect={(key)=>{ setPending(p=>({...p,[ds]:key})); setOpenDay(null); }}
+                            <StatusOpts current={effData} showClear={!!saved}
+                              onApply={(val)=>{ setPending(p=>({...p,[ds]:val})); setOpenDay(null); }}
                               onClear={()=>{ setPending(p=>({...p,[ds]:null})); setOpenDay(null); }}/>
                             {changed&&(
                               <button onClick={()=>{ setPending(p=>{ const c={...p}; delete c[ds]; return c; }); setOpenDay(null); }}
@@ -702,7 +792,7 @@ function App(){
           <StatusOpts
             current={schedules[quickEdit.member.id]?.[quickEdit.dateStr]||null}
             showClear={!!(schedules[quickEdit.member.id]?.[quickEdit.dateStr])}
-            onSelect={(key)=>saveQuickEdit(quickEdit.member, quickEdit.dateStr, key)}
+            onApply={(val)=>saveQuickEdit(quickEdit.member, quickEdit.dateStr, val)}
             onClear={()=>saveQuickEdit(quickEdit.member, quickEdit.dateStr, null)}/>
         )}
       </Modal>

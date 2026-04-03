@@ -901,7 +901,7 @@ function App(){
                       const dayResvs=reservations[ds]||[];
                       return (
                         <div key={di} onClick={()=>{ if(!isPast){ setNewResv({date:ds}); setResvForm({title:"",start:"09:00",end:"10:00",note:""}); } }}
-                          style={{ minHeight:80, padding:"4px 4px 4px 6px", borderRight:di<6?`1px solid ${BRAND_LIGHT}`:"none", background:isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff", cursor:isPast?"default":"pointer", transition:"background 0.1s" }}
+                          style={{ minHeight:80, minWidth:0, overflow:"hidden", padding:"4px 4px 4px 6px", borderRight:di<6?`1px solid ${BRAND_LIGHT}`:"none", background:isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff", cursor:isPast?"default":"pointer", transition:"background 0.1s" }}
                           onMouseEnter={e=>{ if(!isPast) e.currentTarget.style.background=isT?BRAND_LIGHT:BRAND_PALE; }}
                           onMouseLeave={e=>{ e.currentTarget.style.background=isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff"; }}>
                           {/* 日付 */}

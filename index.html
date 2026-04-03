@@ -265,6 +265,13 @@ function App(){
   const [confirmLoad, setConfirmLoad] = useState(null); // { year, month }
   const [quickEdit, setQuickEdit]     = useState(null); // { member, dateStr }
   const [gapView, setGapView]         = useState(null); // { member, dateStr } 他ユーザーの一時不在確認
+  /* 施設予約 */
+  const [calMonth, setCalMonth]       = useState({ year:TODAY.getFullYear(), month:TODAY.getMonth() });
+  const [reservations, setReservations] = useState({});      // { dateStr: [reservation] }
+  const [loadedResvMonths, setLoadedResvMonths] = useState(new Set());
+  const [resvDetail, setResvDetail]   = useState(null);      // 予約詳細表示
+  const [newResv, setNewResv]         = useState(null);      // 新規予約フォーム用 { date }
+  const [resvForm, setResvForm]       = useState({ title:"", start:"09:00", end:"10:00", note:"" });
 
   const [toastMsg, setToastMsg]       = useState("");
   const [toastVis, setToastVis]       = useState(false);
@@ -385,6 +392,15 @@ function App(){
     if (!loadedMonths.has(key) && !isFarPast(year, month)) loadMonthData(year, month);
   }, [editMonth, members]);
 
+  /* ─ calMonth 変更時: 予約データ + スケジュールを読み込む ─ */
+  useEffect(()=>{
+    if (members.length===0) return;
+    const { year, month }=calMonth;
+    const key=mkey(year,month);
+    if (!loadedResvMonths.has(key)) loadReservations(year,month);
+    if (!loadedMonths.has(key)&&!isFarPast(year,month)) loadMonthData(year,month);
+  },[calMonth, members]);
+
   /* ─ pending 系 ─ */
   const resetPending = ()=>{ setPending({}); setOpenDay(null); };
   const pendingCount = useMemo(()=>{
@@ -494,6 +510,74 @@ function App(){
     }
     return { am:!amOk, pm:!pmOk, intervals };
   }, [members, schedules]);
+
+  /* ─ 施設予約: 月データ読み込み ─ */
+  const loadReservations = useCallback(async (year, month)=>{
+    if (!SUPABASE_OK) return;
+    const key=mkey(year,month);
+    const start=`${year}-${String(month+1).padStart(2,"0")}-01`;
+    const last=new Date(year,month+1,0).getDate();
+    const end=`${year}-${String(month+1).padStart(2,"0")}-${String(last).padStart(2,"0")}`;
+    const { data }=await sb.from("reservations").select("*").gte("date",start).lte("date",end).order("start_time");
+    if (data){
+      setReservations(prev=>{
+        const u={...prev};
+        // 該当月を一旦クリア
+        data.forEach(r=>{
+          if (!u[r.date]) u[r.date]=[];
+        });
+        // 重複を避けて上書き
+        const byDate={};
+        data.forEach(r=>{
+          if (!byDate[r.date]) byDate[r.date]=[];
+          byDate[r.date].push({ id:r.id, title:r.title, date:r.date, startTime:r.start_time, endTime:r.end_time, createdBy:r.created_by, createdByName:r.created_by_name, note:r.note||"", createdAt:r.created_at });
+        });
+        return { ...u, ...byDate };
+      });
+    }
+    setLoadedResvMonths(prev=>new Set([...prev,key]));
+  },[]);
+
+  /* ─ 施設予約: 保存 ─ */
+  const saveReservation = useCallback(async ()=>{
+    if (!resvForm.title.trim()||!newResv?.date||!currentUser) return;
+    if (resvForm.start>=resvForm.end){ toast("終了時間は開始時間より後にしてください"); return; }
+    const payload={ title:resvForm.title.trim(), date:newResv.date, start_time:resvForm.start, end_time:resvForm.end, created_by:currentUser.id, created_by_name:currentUser.name, note:resvForm.note.trim() };
+    if (SUPABASE_OK){
+      const { data }=await sb.from("reservations").insert(payload).select().single();
+      if (data){
+        const r={ id:data.id, title:data.title, date:data.date, startTime:data.start_time, endTime:data.end_time, createdBy:data.created_by, createdByName:data.created_by_name, note:data.note||"", createdAt:data.created_at };
+        setReservations(prev=>{ const u={...prev}; u[r.date]=[...(u[r.date]||[]),r].sort((a,b)=>a.startTime.localeCompare(b.startTime)); return u; });
+      }
+    }
+    setNewResv(null); setResvForm({ title:"", start:"09:00", end:"10:00", note:"" });
+    toast("予約しました");
+  },[resvForm, newResv, currentUser]);
+
+  /* ─ 施設予約: 削除 ─ */
+  const deleteReservation = useCallback(async (resv)=>{
+    if (SUPABASE_OK) await sb.from("reservations").delete().eq("id",resv.id);
+    setReservations(prev=>{ const u={...prev}; if(u[resv.date]) u[resv.date]=u[resv.date].filter(r=>r.id!==resv.id); return u; });
+    setResvDetail(null); toast("予約を削除しました");
+  },[]);
+
+  /* ─ 施設予約: イベント時間帯にMEDIUMにいるメンバー ─ */
+  const getMembersAtMedium = useCallback((dateStr, startTime, endTime)=>{
+    const evStart=toMinutes(startTime), evEnd=toMinutes(endTime);
+    const STATUS_RANGE={ MEDIUM_ALL:[9*60,18*60], AM_MEDIUM_PM_OTHER:[9*60,12*60], PM_MEDIUM_AM_OTHER:[12*60,18*60] };
+    return members.filter(m=>{
+      const entry=schedules[m.id]?.[dateStr];
+      if (!entry) return false;
+      const status=entry.status||entry, gaps=entry.gaps||[];
+      const range=STATUS_RANGE[status];
+      if (!range) return false;
+      const [rs,re]=range;
+      for (let min=Math.max(evStart,rs);min<Math.min(evEnd,re);min++){
+        if (!gaps.some(g=>min>=toMinutes(g.start)&&min<toMinutes(g.end))) return true;
+      }
+      return false;
+    });
+  },[members,schedules]);
 
   /* ─ 月ナビ ─ */
   const navMonth=(setter,dir)=>setter(prev=>{ let m=prev.month+dir,y=prev.year; if(m<0){m=11;y--;} if(m>11){m=0;y++;} return {year:y,month:m}; });
@@ -607,7 +691,7 @@ function App(){
 
       {/* タブ */}
       <div style={{ display:"flex", padding:"12px 24px 0", background:"#fff" }}>
-        {[{key:"overview",label:"一覧"},{key:"edit",label:"入力"},{key:"members",label:"メンバー"}].map(t=>(
+        {[{key:"overview",label:"一覧"},{key:"edit",label:"入力"},{key:"calendar",label:"予約"},{key:"members",label:"メンバー"}].map(t=>(
           <button key={t.key}
             onClick={()=>{ setTab(t.key); resetPending(); }}
             style={{ padding:"10px 20px", border:"none", borderBottom:tab===t.key?`2.5px solid ${BRAND}`:"2.5px solid transparent", background:"none", color:tab===t.key?BRAND:"#8a9ab0", fontWeight:tab===t.key?600:400, fontSize:14, cursor:"pointer", fontFamily:"inherit" }}>
@@ -777,6 +861,78 @@ function App(){
           </div>
         )}
 
+        {/* ══ 予約カレンダータブ ════════════════════════════════ */}
+        {tab==="calendar"&&(()=>{
+          const { year, month }=calMonth;
+          const days=mdays(year,month);
+          const firstDow=days[0].getDay();
+          const cells=[...Array(firstDow).fill(null),...days];
+          while(cells.length%7!==0) cells.push(null);
+          const weeks=[]; for(let i=0;i<cells.length;i+=7) weeks.push(cells.slice(i,i+7));
+          const DOW_LABELS=["日","月","火","水","木","金","土"];
+          const todayStr=fmt(TODAY);
+          return (
+            <div>
+              {/* ヘッダー */}
+              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+                <button onClick={()=>navMonth(setCalMonth,-1)} style={navBtn}>◀</button>
+                <h2 style={{ margin:0, fontSize:18, fontWeight:600, color:"#1a2a3a" }}>{mLabel(year,month)}</h2>
+                <div style={{ display:"flex", gap:8 }}>
+                  <button onClick={()=>setCalMonth({year:TODAY.getFullYear(),month:TODAY.getMonth()})}
+                    style={{ background:BRAND, border:`1px solid ${BRAND}`, borderRadius:8, padding:"6px 14px", cursor:"pointer", color:"#fff", fontSize:13, fontFamily:"inherit", fontWeight:600 }}>今日</button>
+                  <button onClick={()=>navMonth(setCalMonth,1)} style={navBtn}>▶</button>
+                </div>
+              </div>
+              {/* カレンダー */}
+              <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${BRAND_LIGHT}`, overflow:"hidden" }}>
+                {/* 曜日ヘッダー */}
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", borderBottom:`1px solid ${BRAND_LIGHT}` }}>
+                  {DOW_LABELS.map((d,i)=>(
+                    <div key={d} style={{ padding:"8px 0", textAlign:"center", fontSize:12, fontWeight:600, color:i===0?RED_ALERT:i===6?BRAND:"#667", background:"#fafbfc" }}>{d}</div>
+                  ))}
+                </div>
+                {/* 週ごとの行 */}
+                {weeks.map((week,wi)=>(
+                  <div key={wi} style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", borderBottom:wi<weeks.length-1?`1px solid ${BRAND_LIGHT}`:"none" }}>
+                    {week.map((d,di)=>{
+                      if (!d) return <div key={di} style={{ minHeight:80, background:"#fafbfc", borderRight:di<6?`1px solid ${BRAND_LIGHT}`:"none" }}/>;
+                      const ds=fmt(d), isT=ds===todayStr, isPast=d<TODAY, isSun=di===0, isSat=di===6;
+                      const dayResvs=reservations[ds]||[];
+                      return (
+                        <div key={di} onClick={()=>{ if(!isPast){ setNewResv({date:ds}); setResvForm({title:"",start:"09:00",end:"10:00",note:""}); } }}
+                          style={{ minHeight:80, padding:"4px 4px 4px 6px", borderRight:di<6?`1px solid ${BRAND_LIGHT}`:"none", background:isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff", cursor:isPast?"default":"pointer", transition:"background 0.1s" }}
+                          onMouseEnter={e=>{ if(!isPast) e.currentTarget.style.background=isT?BRAND_LIGHT:BRAND_PALE; }}
+                          onMouseLeave={e=>{ e.currentTarget.style.background=isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff"; }}>
+                          {/* 日付 */}
+                          <div style={{ fontSize:12, fontWeight:isT?700:400, color:isT?BRAND:isSun?RED_ALERT:isSat?BRAND:isPast?"#bbb":"#1a2a3a",
+                            width:22, height:22, borderRadius:"50%", display:"flex", alignItems:"center", justifyContent:"center",
+                            background:isT?BRAND:"transparent", color:isT?"#fff":isSun?RED_ALERT:isSat?BRAND:isPast?"#bbb":"#1a2a3a" }}>
+                            {d.getDate()}
+                          </div>
+                          {/* 予約ブロック */}
+                          <div style={{ marginTop:2, display:"flex", flexDirection:"column", gap:2 }}>
+                            {dayResvs.slice(0,3).map(r=>(
+                              <div key={r.id}
+                                onClick={e=>{ e.stopPropagation(); setResvDetail(r); }}
+                                style={{ background:BRAND, color:"#fff", borderRadius:4, padding:"1px 5px", fontSize:10, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor:"pointer" }}>
+                                {r.startTime.slice(0,5)} {r.title}
+                              </div>
+                            ))}
+                            {dayResvs.length>3&&(
+                              <div style={{ fontSize:10, color:"#8a9ab0", paddingLeft:4 }}>+{dayResvs.length-3}件</div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize:12, color:"#8a9ab0", marginTop:10 }}>※ 日付をタップして予約、予約ブロックをタップで詳細確認</p>
+            </div>
+          );
+        })()}
+
         {/* ══ メンバータブ ══════════════════════════════════════ */}
         {tab==="members"&&(
           <div>
@@ -831,6 +987,101 @@ function App(){
                   </div>
                 ))}
               </div>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      {/* ══ 新規予約モーダル ════════════════════════════════════ */}
+      <Modal open={!!newResv} onClose={()=>setNewResv(null)} title={newResv?`施設予約：${dispDate(newResv.date)}`:"新規予約"} width={400}>
+        {newResv&&(
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>タイトル <span style={{ color:RED_ALERT }}>*</span></label>
+              <input value={resvForm.title} onChange={e=>setResvForm(f=>({...f,title:e.target.value}))}
+                placeholder="例：全体MTG、クライアント訪問"
+                style={{ width:"100%", padding:"9px 12px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>開始時間</label>
+                <input type="time" value={resvForm.start} onChange={e=>setResvForm(f=>({...f,start:e.target.value}))}
+                  style={{ width:"100%", padding:"9px 10px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit" }}/>
+              </div>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>終了時間</label>
+                <input type="time" value={resvForm.end} onChange={e=>setResvForm(f=>({...f,end:e.target.value}))}
+                  style={{ width:"100%", padding:"9px 10px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit" }}/>
+              </div>
+            </div>
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>メモ（任意）</label>
+              <textarea value={resvForm.note} onChange={e=>setResvForm(f=>({...f,note:e.target.value}))} rows={2}
+                placeholder="備考・詳細など"
+                style={{ width:"100%", padding:"9px 12px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", resize:"vertical", outline:"none" }}/>
+            </div>
+            {/* MEDIUMにいるメンバープレビュー */}
+            {(()=>{
+              const present=getMembersAtMedium(newResv.date, resvForm.start, resvForm.end);
+              return (
+                <div style={{ padding:"10px 12px", background:BRAND_PALE, borderRadius:8, border:`1px solid ${BRAND_LIGHT}` }}>
+                  <div style={{ fontSize:11, fontWeight:600, color:BRAND, marginBottom:6 }}>この時間帯にMEDIUMにいるメンバー</div>
+                  {present.length===0
+                    ? <span style={{ fontSize:12, color:"#8a9ab0" }}>スケジュール未登録または不在</span>
+                    : <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                        {present.map(m=>(
+                          <span key={m.id} style={{ display:"flex", alignItems:"center", gap:4, background:"#fff", border:`1px solid ${BRAND_LIGHT}`, borderRadius:20, padding:"2px 8px 2px 4px", fontSize:12 }}>
+                            <span style={{ width:18, height:18, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:8, fontWeight:700 }}>{initials(m.name)}</span>
+                            {m.name}
+                          </span>
+                        ))}
+                      </div>}
+                </div>
+              );
+            })()}
+            <button onClick={saveReservation} disabled={!resvForm.title.trim()}
+              style={{ padding:"11px 0", background:resvForm.title.trim()?BRAND:"#ccc", color:"#fff", border:"none", borderRadius:8, fontSize:14, fontWeight:700, cursor:resvForm.title.trim()?"pointer":"not-allowed", fontFamily:"inherit" }}>
+              予約する
+            </button>
+          </div>
+        )}
+      </Modal>
+
+      {/* ══ 予約詳細モーダル ════════════════════════════════════ */}
+      <Modal open={!!resvDetail} onClose={()=>setResvDetail(null)} title="予約詳細" width={400}>
+        {resvDetail&&(()=>{
+          const present=getMembersAtMedium(resvDetail.date, resvDetail.startTime, resvDetail.endTime);
+          const isCreator=currentUser?.id===resvDetail.createdBy;
+          return (
+            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+              <div>
+                <div style={{ fontSize:18, fontWeight:700, color:"#1a2a3a", marginBottom:4 }}>{resvDetail.title}</div>
+                <div style={{ fontSize:13, color:"#667" }}>{dispDate(resvDetail.date)}　{resvDetail.startTime} 〜 {resvDetail.endTime}</div>
+              </div>
+              <div style={{ fontSize:12, color:"#8a9ab0" }}>予約者：{resvDetail.createdByName}</div>
+              {resvDetail.note&&(
+                <div style={{ padding:"10px 12px", background:"#f8f9fb", borderRadius:8, fontSize:13, color:"#445", lineHeight:1.6 }}>{resvDetail.note}</div>
+              )}
+              {/* MEDIUMにいるメンバー */}
+              <div style={{ padding:"12px 14px", background:BRAND_PALE, borderRadius:8, border:`1px solid ${BRAND_LIGHT}` }}>
+                <div style={{ fontSize:12, fontWeight:700, color:BRAND, marginBottom:8 }}>この時間帯にMEDIUMにいるメンバー</div>
+                {present.length===0
+                  ? <span style={{ fontSize:12, color:"#8a9ab0" }}>スケジュール未登録または不在</span>
+                  : <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                      {present.map(m=>(
+                        <span key={m.id} style={{ display:"flex", alignItems:"center", gap:5, background:"#fff", border:`1px solid ${BRAND_LIGHT}`, borderRadius:20, padding:"4px 10px 4px 4px", fontSize:13 }}>
+                          <span style={{ width:22, height:22, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700 }}>{initials(m.name)}</span>
+                          {m.name}
+                        </span>
+                      ))}
+                    </div>}
+              </div>
+              {isCreator&&(
+                <button onClick={()=>deleteReservation(resvDetail)}
+                  style={{ padding:"9px 0", background:"#fff", color:RED_ALERT, border:`1px solid ${RED_ALERT}44`, borderRadius:8, fontSize:13, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+                  この予約を削除
+                </button>
+              )}
             </div>
           );
         })()}

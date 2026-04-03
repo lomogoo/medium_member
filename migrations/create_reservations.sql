@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS reservations (
   date          DATE        NOT NULL,
   start_time    TEXT        NOT NULL,  -- "HH:MM"
   end_time      TEXT        NOT NULL,  -- "HH:MM"
-  created_by    INTEGER     REFERENCES members(id) ON DELETE SET NULL,
+  created_by    UUID        REFERENCES members(id) ON DELETE SET NULL,
   created_by_name TEXT      NOT NULL,
   note          TEXT        NOT NULL DEFAULT '',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()

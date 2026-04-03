@@ -242,6 +242,8 @@ function ProfilePicker({ members, onSelect }){
 }
 
 /* ══ アプリ本体 ══════════════════════════════════════════════ */
+const RESV_EMPTY = { title:"", start:"09:00", end:"10:00", status:"", userName:"", eventFormat:"", eventUrl:"", note:"", umStaff:"", cs5Staff:"" };
+
 function App(){
   const [members, setMembers]         = useState([]);
   const [schedules, setSchedules]     = useState({});      // { memberId: { dateStr: status } }
@@ -271,7 +273,6 @@ function App(){
   const [loadedResvMonths, setLoadedResvMonths] = useState(new Set());
   const [resvDetail, setResvDetail]   = useState(null);      // 予約詳細表示
   const [newResv, setNewResv]         = useState(null);      // 新規予約フォーム用 { date }
-  const RESV_EMPTY = { title:"", start:"09:00", end:"10:00", status:"", userName:"", eventFormat:"", eventUrl:"", note:"", umStaff:"", cs5Staff:"" };
   const [resvForm, setResvForm]       = useState(RESV_EMPTY);
 
   const [toastMsg, setToastMsg]       = useState("");
@@ -553,7 +554,7 @@ function App(){
     }
     setNewResv(null); setResvForm(RESV_EMPTY);
     toast("予約しました");
-  },[resvForm, newResv, currentUser, RESV_EMPTY]);
+  },[resvForm, newResv, currentUser]);
 
   /* ─ 施設予約: 削除 ─ */
   const deleteReservation = useCallback(async (resv)=>{
@@ -900,7 +901,7 @@ function App(){
                       const ds=fmt(d), isT=ds===todayStr, isPast=d<TODAY, isSun=di===0, isSat=di===6;
                       const dayResvs=reservations[ds]||[];
                       return (
-                        <div key={di} onClick={()=>{ if(!isPast){ setNewResv({date:ds}); setResvForm({title:"",start:"09:00",end:"10:00",note:""}); } }}
+                        <div key={di} onClick={()=>{ if(!isPast){ setNewResv({date:ds}); setResvForm(RESV_EMPTY); } }}
                           style={{ minHeight:80, minWidth:0, overflow:"hidden", padding:"4px 4px 4px 6px", borderRight:di<6?`1px solid ${BRAND_LIGHT}`:"none", background:isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff", cursor:isPast?"default":"pointer", transition:"background 0.1s" }}
                           onMouseEnter={e=>{ if(!isPast) e.currentTarget.style.background=isT?BRAND_LIGHT:BRAND_PALE; }}
                           onMouseLeave={e=>{ e.currentTarget.style.background=isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff"; }}>
@@ -918,7 +919,7 @@ function App(){
                                 <div key={r.id}
                                   onClick={e=>{ e.stopPropagation(); setResvDetail(r); }}
                                   style={{ background:bg, color:"#fff", borderRadius:4, padding:"1px 5px", fontSize:10, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor:"pointer" }}>
-                                  {r.startTime.slice(0,5)} {r.userName?`[${r.userName}] `:""}{r.title}
+                                  {r.startTime.slice(0,5)} {r.title}
                                 </div>
                               );
                             })}

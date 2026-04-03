@@ -264,6 +264,7 @@ function App(){
   const [newName, setNewName]         = useState("");
   const [confirmLoad, setConfirmLoad] = useState(null); // { year, month }
   const [quickEdit, setQuickEdit]     = useState(null); // { member, dateStr }
+  const [gapView, setGapView]         = useState(null); // { member, dateStr } 他ユーザーの一時不在確認
 
   const [toastMsg, setToastMsg]       = useState("");
   const [toastVis, setToastVis]       = useState(false);
@@ -670,10 +671,14 @@ function App(){
                       {viewDays.map(d=>{
                         const ds=fmt(d), we=isWE(d), entry=schedules[m.id]?.[ds], isT=ds===fmt(TODAY);
                         const statusVal=entry?.status||null;
+                        const hasGaps=entry?.gaps?.length>0;
+                        const isOwn=!we&&currentUser&&m.id===currentUser.id;
+                        const isOtherGap=!isOwn&&hasGaps;
+                        const clickable=isOwn||isOtherGap;
                         return (
                           <td key={ds}
-                          className={!we && currentUser && m.id===currentUser.id?"cell-clickable":""}
-                          onClick={!we && currentUser && m.id===currentUser.id?()=>setQuickEdit({member:m,dateStr:ds}):undefined}
+                            className={clickable?"cell-clickable":""}
+                            onClick={isOwn?()=>setQuickEdit({member:m,dateStr:ds}):isOtherGap?()=>setGapView({member:m,dateStr:ds}):undefined}
                             style={{ ...tdS, background:we?"#fafafa":isT?BRAND_PALE:"#fff", verticalAlign:"middle", transition:"background 0.1s" }}>
                             {!entry
                               ? <span style={{ color:"#ddd" }}>{we?"":"–"}</span>
@@ -681,7 +686,11 @@ function App(){
                                   {statusVal==="MEDIUM_ALL"
                                     ? <MediumMark size={13}/>
                                     : <span style={{ color:statusVal==="ABSENT"?RED_ALERT:BRAND, fontWeight:600, fontSize:11 }}>{STATUS_OPTIONS.find(o=>o.key===statusVal)?.short}</span>}
-                                  {entry.gaps?.length>0&&<span style={{ color:RED_ALERT, fontSize:8, fontWeight:700 }}>一時不在</span>}
+                                  {hasGaps&&(
+                                    <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke={RED_ALERT} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 15 14"/>
+                                    </svg>
+                                  )}
                                 </div>}
                           </td>
                         );
@@ -698,7 +707,10 @@ function App(){
               <span><strong style={{ color:BRAND }}>PM</strong> PM　MEDIUM勤務</span>
               <span><strong style={{ color:RED_ALERT }}>✖</strong> 不在</span>
               <span style={{ color:RED_ALERT }}>⚠ MEDIUM不在</span>
-              <span style={{ color:RED_ALERT, fontSize:11, fontWeight:700 }}>一時不在</span><span style={{ color:"#667" }}> 一時不在あり</span>
+              <span style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke={RED_ALERT} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 15 14"/></svg>
+                <span> 一時不在あり（タップで時間確認）</span>
+              </span>
               <span style={{ color:"#8a9ab0" }}>※ セルをタップして直接入力可</span>
             </div>
           </div>
@@ -795,6 +807,31 @@ function App(){
             onApply={(val)=>saveQuickEdit(quickEdit.member, quickEdit.dateStr, val)}
             onClear={()=>saveQuickEdit(quickEdit.member, quickEdit.dateStr, null)}/>
         )}
+      </Modal>
+
+      {/* ══ 一時不在確認モーダル（他ユーザー） ════════════════════ */}
+      <Modal open={!!gapView} onClose={()=>setGapView(null)}
+        title={gapView?`${gapView.member.name} ／ ${dispDate(gapView.dateStr)}`:""}  width={320}>
+        {gapView&&(()=>{
+          const entry=schedules[gapView.member.id]?.[gapView.dateStr];
+          const statusLabel=STATUS_OPTIONS.find(o=>o.key===entry?.status)?.label||"";
+          return (
+            <div>
+              <div style={{ fontSize:13, color:"#667", marginBottom:14 }}>{statusLabel}</div>
+              <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:10 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={RED_ALERT} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 15 14"/></svg>
+                <span style={{ fontSize:12, fontWeight:700, color:RED_ALERT }}>一時不在時間帯</span>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {entry?.gaps?.map((gap,i)=>(
+                  <div key={i} style={{ padding:"10px 14px", background:RED_LIGHT, borderRadius:8, fontSize:15, fontWeight:700, color:RED_ALERT, textAlign:"center", letterSpacing:1 }}>
+                    {gap.start} 〜 {gap.end}
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* ══ 先々月以前の読み込み確認 ═══════════════════════════ */}

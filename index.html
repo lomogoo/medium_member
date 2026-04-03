@@ -702,7 +702,7 @@ function App(){
         ))}
       </div>
 
-      <main style={{ padding:"20px 24px", maxWidth:960, margin:"0 auto", paddingBottom:tab==="edit"&&selectedMember&&pendingCount>0?100:20 }}>
+      <main style={{ padding:`20px ${tab==="calendar"?"8px":"24px"}`, maxWidth:960, margin:"0 auto", paddingBottom:tab==="edit"&&selectedMember&&pendingCount>0?100:20 }}>
 
         {/* ══ 一覧タブ ══════════════════════════════════════════ */}
         {tab==="overview"&&(
@@ -902,7 +902,7 @@ function App(){
                       const dayResvs=reservations[ds]||[];
                       return (
                         <div key={di} onClick={()=>{ if(!isPast){ setNewResv({date:ds}); setResvForm(RESV_EMPTY); } }}
-                          style={{ minHeight:80, minWidth:0, overflow:"hidden", padding:"4px 4px 4px 6px", borderRight:di<6?`1px solid ${BRAND_LIGHT}`:"none", background:isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff", cursor:isPast?"default":"pointer", transition:"background 0.1s" }}
+                          style={{ minHeight:80, minWidth:0, overflow:"hidden", padding:"3px 2px 3px 3px", borderRight:di<6?`1px solid ${BRAND_LIGHT}`:"none", background:isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff", cursor:isPast?"default":"pointer", transition:"background 0.1s" }}
                           onMouseEnter={e=>{ if(!isPast) e.currentTarget.style.background=isT?BRAND_LIGHT:BRAND_PALE; }}
                           onMouseLeave={e=>{ e.currentTarget.style.background=isT?BRAND_LIGHT:isPast?"#fafbfc":"#fff"; }}>
                           {/* 日付 */}
@@ -918,7 +918,7 @@ function App(){
                               return (
                                 <div key={r.id}
                                   onClick={e=>{ e.stopPropagation(); setResvDetail(r); }}
-                                  style={{ background:bg, color:"#fff", borderRadius:4, padding:"1px 5px", fontSize:10, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor:"pointer" }}>
+                                  style={{ background:bg, color:"#fff", borderRadius:3, padding:"2px 3px", fontSize:11, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor:"pointer", lineHeight:1.3 }}>
                                   {r.title}
                                 </div>
                               );

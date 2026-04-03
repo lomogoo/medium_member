@@ -271,7 +271,8 @@ function App(){
   const [loadedResvMonths, setLoadedResvMonths] = useState(new Set());
   const [resvDetail, setResvDetail]   = useState(null);      // 予約詳細表示
   const [newResv, setNewResv]         = useState(null);      // 新規予約フォーム用 { date }
-  const [resvForm, setResvForm]       = useState({ title:"", start:"09:00", end:"10:00", note:"" });
+  const RESV_EMPTY = { title:"", start:"09:00", end:"10:00", status:"", userName:"", eventFormat:"", eventUrl:"", note:"", umStaff:"", cs5Staff:"" };
+  const [resvForm, setResvForm]       = useState(RESV_EMPTY);
 
   const [toastMsg, setToastMsg]       = useState("");
   const [toastVis, setToastVis]       = useState(false);
@@ -530,7 +531,7 @@ function App(){
         const byDate={};
         data.forEach(r=>{
           if (!byDate[r.date]) byDate[r.date]=[];
-          byDate[r.date].push({ id:r.id, title:r.title, date:r.date, startTime:r.start_time, endTime:r.end_time, createdBy:r.created_by, createdByName:r.created_by_name, note:r.note||"", createdAt:r.created_at });
+          byDate[r.date].push({ id:r.id, title:r.title, date:r.date, startTime:r.start_time, endTime:r.end_time, createdBy:r.created_by, createdByName:r.created_by_name, status:r.status||"", userName:r.user_name||"", eventFormat:r.event_format||"", eventUrl:r.event_url||"", note:r.note||"", umStaff:r.um_staff||"", cs5Staff:r.cs5_staff||"", createdAt:r.created_at });
         });
         return { ...u, ...byDate };
       });
@@ -542,17 +543,17 @@ function App(){
   const saveReservation = useCallback(async ()=>{
     if (!resvForm.title.trim()||!newResv?.date||!currentUser) return;
     if (resvForm.start>=resvForm.end){ toast("終了時間は開始時間より後にしてください"); return; }
-    const payload={ title:resvForm.title.trim(), date:newResv.date, start_time:resvForm.start, end_time:resvForm.end, created_by:currentUser.id, created_by_name:currentUser.name, note:resvForm.note.trim() };
+    const payload={ title:resvForm.title.trim(), date:newResv.date, start_time:resvForm.start, end_time:resvForm.end, created_by:currentUser.id, created_by_name:currentUser.name, status:resvForm.status, user_name:resvForm.userName.trim(), event_format:resvForm.eventFormat.trim(), event_url:resvForm.eventUrl.trim(), note:resvForm.note.trim(), um_staff:resvForm.umStaff.trim(), cs5_staff:resvForm.cs5Staff.trim() };
     if (SUPABASE_OK){
       const { data }=await sb.from("reservations").insert(payload).select().single();
       if (data){
-        const r={ id:data.id, title:data.title, date:data.date, startTime:data.start_time, endTime:data.end_time, createdBy:data.created_by, createdByName:data.created_by_name, note:data.note||"", createdAt:data.created_at };
+        const r={ id:data.id, title:data.title, date:data.date, startTime:data.start_time, endTime:data.end_time, createdBy:data.created_by, createdByName:data.created_by_name, status:data.status||"", userName:data.user_name||"", eventFormat:data.event_format||"", eventUrl:data.event_url||"", note:data.note||"", umStaff:data.um_staff||"", cs5Staff:data.cs5_staff||"", createdAt:data.created_at };
         setReservations(prev=>{ const u={...prev}; u[r.date]=[...(u[r.date]||[]),r].sort((a,b)=>a.startTime.localeCompare(b.startTime)); return u; });
       }
     }
-    setNewResv(null); setResvForm({ title:"", start:"09:00", end:"10:00", note:"" });
+    setNewResv(null); setResvForm(RESV_EMPTY);
     toast("予約しました");
-  },[resvForm, newResv, currentUser]);
+  },[resvForm, newResv, currentUser, RESV_EMPTY]);
 
   /* ─ 施設予約: 削除 ─ */
   const deleteReservation = useCallback(async (resv)=>{
@@ -911,13 +912,16 @@ function App(){
                           </div>
                           {/* 予約ブロック */}
                           <div style={{ marginTop:2, display:"flex", flexDirection:"column", gap:2 }}>
-                            {dayResvs.slice(0,3).map(r=>(
-                              <div key={r.id}
-                                onClick={e=>{ e.stopPropagation(); setResvDetail(r); }}
-                                style={{ background:BRAND, color:"#fff", borderRadius:4, padding:"1px 5px", fontSize:10, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor:"pointer" }}>
-                                {r.startTime.slice(0,5)} {r.title}
-                              </div>
-                            ))}
+                            {dayResvs.slice(0,3).map(r=>{
+                              const bg=r.status==="仮予約"?"#f59e0b":BRAND;
+                              return (
+                                <div key={r.id}
+                                  onClick={e=>{ e.stopPropagation(); setResvDetail(r); }}
+                                  style={{ background:bg, color:"#fff", borderRadius:4, padding:"1px 5px", fontSize:10, fontWeight:500, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis", cursor:"pointer" }}>
+                                  {r.startTime.slice(0,5)} {r.userName?`[${r.userName}] `:""}{r.title}
+                                </div>
+                              );
+                            })}
                             {dayResvs.length>3&&(
                               <div style={{ fontSize:10, color:"#8a9ab0", paddingLeft:4 }}>+{dayResvs.length-3}件</div>
                             )}
@@ -993,15 +997,29 @@ function App(){
       </Modal>
 
       {/* ══ 新規予約モーダル ════════════════════════════════════ */}
-      <Modal open={!!newResv} onClose={()=>setNewResv(null)} title={newResv?`施設予約：${dispDate(newResv.date)}`:"新規予約"} width={400}>
+      <Modal open={!!newResv} onClose={()=>setNewResv(null)} title={newResv?`施設予約：${dispDate(newResv.date)}`:"新規予約"} width={460}>
         {newResv&&(
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+          <div style={{ display:"flex", flexDirection:"column", gap:11 }}>
+            {/* ステータス */}
             <div>
-              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>タイトル <span style={{ color:RED_ALERT }}>*</span></label>
+              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>ステータス</label>
+              <div style={{ display:"flex", gap:8 }}>
+                {["","決定","仮予約"].map(s=>(
+                  <button key={s} onClick={()=>setResvForm(f=>({...f,status:s}))}
+                    style={{ flex:1, padding:"7px 0", borderRadius:7, border:resvForm.status===s?`1.5px solid ${s==="仮予約"?"#f59e0b":BRAND}`:`1px solid #dde4ee`, background:resvForm.status===s?(s==="仮予約"?"#fff8eb":BRAND_PALE):"#fff", color:resvForm.status===s?(s==="仮予約"?"#b45309":BRAND):"#667", fontWeight:resvForm.status===s?700:400, fontSize:13, cursor:"pointer", fontFamily:"inherit" }}>
+                    {s||"未設定"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {/* イベントタイトル */}
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>イベントタイトル <span style={{ color:RED_ALERT }}>*</span></label>
               <input value={resvForm.title} onChange={e=>setResvForm(f=>({...f,title:e.target.value}))}
-                placeholder="例：全体MTG、クライアント訪問"
+                placeholder="例：AIセミナー、まるいち"
                 style={{ width:"100%", padding:"9px 12px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
             </div>
+            {/* 実施時間 */}
             <div style={{ display:"flex", gap:10 }}>
               <div style={{ flex:1 }}>
                 <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>開始時間</label>
@@ -1014,10 +1032,47 @@ function App(){
                   style={{ width:"100%", padding:"9px 10px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit" }}/>
               </div>
             </div>
+            {/* 利用者名 */}
             <div>
-              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>メモ（任意）</label>
+              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>利用者名</label>
+              <input value={resvForm.userName} onChange={e=>setResvForm(f=>({...f,userName:e.target.value}))}
+                placeholder="例：デジタルゴリラ、スパークル"
+                style={{ width:"100%", padding:"9px 12px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
+            </div>
+            {/* 形式 */}
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>形式</label>
+              <input value={resvForm.eventFormat} onChange={e=>setResvForm(f=>({...f,eventFormat:e.target.value}))}
+                list="format-options" placeholder="リアル / オンライン / その他"
+                style={{ width:"100%", padding:"9px 12px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
+              <datalist id="format-options">
+                <option value="リアル"/><option value="オンライン"/><option value="リアル+オンライン"/>
+              </datalist>
+            </div>
+            {/* イベントURL */}
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>イベントURL</label>
+              <input value={resvForm.eventUrl} onChange={e=>setResvForm(f=>({...f,eventUrl:e.target.value}))}
+                placeholder="https://..."
+                style={{ width:"100%", padding:"9px 12px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
+            </div>
+            {/* 担当者 */}
+            <div style={{ display:"flex", gap:10 }}>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>UM担当者</label>
+                <input value={resvForm.umStaff} onChange={e=>setResvForm(f=>({...f,umStaff:e.target.value}))}
+                  style={{ width:"100%", padding:"9px 10px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
+              </div>
+              <div style={{ flex:1 }}>
+                <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>CS5担当者</label>
+                <input value={resvForm.cs5Staff} onChange={e=>setResvForm(f=>({...f,cs5Staff:e.target.value}))}
+                  style={{ width:"100%", padding:"9px 10px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", outline:"none" }}/>
+              </div>
+            </div>
+            {/* 備考 */}
+            <div>
+              <label style={{ fontSize:12, fontWeight:600, color:"#556", display:"block", marginBottom:4 }}>備考</label>
               <textarea value={resvForm.note} onChange={e=>setResvForm(f=>({...f,note:e.target.value}))} rows={2}
-                placeholder="備考・詳細など"
                 style={{ width:"100%", padding:"9px 12px", border:`1px solid ${BRAND_MID}`, borderRadius:8, fontSize:13, fontFamily:"inherit", resize:"vertical", outline:"none" }}/>
             </div>
             {/* MEDIUMにいるメンバープレビュー */}
@@ -1048,20 +1103,30 @@ function App(){
       </Modal>
 
       {/* ══ 予約詳細モーダル ════════════════════════════════════ */}
-      <Modal open={!!resvDetail} onClose={()=>setResvDetail(null)} title="予約詳細" width={400}>
+      <Modal open={!!resvDetail} onClose={()=>setResvDetail(null)} title="予約詳細" width={440}>
         {resvDetail&&(()=>{
           const present=getMembersAtMedium(resvDetail.date, resvDetail.startTime, resvDetail.endTime);
           const isCreator=currentUser?.id===resvDetail.createdBy;
+          const statusColor=resvDetail.status==="仮予約"?"#f59e0b":resvDetail.status==="決定"?BRAND:"#8a9ab0";
+          const Row=({label,value})=>value?(<div style={{ display:"flex", gap:8, fontSize:13 }}><span style={{ minWidth:90, color:"#8a9ab0", flexShrink:0 }}>{label}</span><span style={{ color:"#1a2a3a" }}>{value}</span></div>):null;
           return (
-            <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+            <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+              {/* ヘッダー */}
               <div>
+                {resvDetail.status&&<span style={{ display:"inline-block", background:statusColor+"22", color:statusColor, border:`1px solid ${statusColor}44`, borderRadius:4, fontSize:11, fontWeight:700, padding:"1px 8px", marginBottom:6 }}>{resvDetail.status}</span>}
                 <div style={{ fontSize:18, fontWeight:700, color:"#1a2a3a", marginBottom:4 }}>{resvDetail.title}</div>
                 <div style={{ fontSize:13, color:"#667" }}>{dispDate(resvDetail.date)}　{resvDetail.startTime} 〜 {resvDetail.endTime}</div>
               </div>
-              <div style={{ fontSize:12, color:"#8a9ab0" }}>予約者：{resvDetail.createdByName}</div>
-              {resvDetail.note&&(
-                <div style={{ padding:"10px 12px", background:"#f8f9fb", borderRadius:8, fontSize:13, color:"#445", lineHeight:1.6 }}>{resvDetail.note}</div>
-              )}
+              {/* 詳細フィールド */}
+              <div style={{ display:"flex", flexDirection:"column", gap:6, padding:"10px 12px", background:"#f8f9fb", borderRadius:8 }}>
+                <Row label="利用者名" value={resvDetail.userName}/>
+                <Row label="形式" value={resvDetail.eventFormat}/>
+                {resvDetail.eventUrl&&<div style={{ display:"flex", gap:8, fontSize:13 }}><span style={{ minWidth:90, color:"#8a9ab0", flexShrink:0 }}>イベントURL</span><a href={resvDetail.eventUrl} target="_blank" rel="noreferrer" style={{ color:BRAND, wordBreak:"break-all" }}>{resvDetail.eventUrl}</a></div>}
+                <Row label="備考" value={resvDetail.note}/>
+                <Row label="UM担当者" value={resvDetail.umStaff}/>
+                <Row label="CS5担当者" value={resvDetail.cs5Staff}/>
+                <Row label="登録者" value={resvDetail.createdByName}/>
+              </div>
               {/* MEDIUMにいるメンバー */}
               <div style={{ padding:"12px 14px", background:BRAND_PALE, borderRadius:8, border:`1px solid ${BRAND_LIGHT}` }}>
                 <div style={{ fontSize:12, fontWeight:700, color:BRAND, marginBottom:8 }}>この時間帯にMEDIUMにいるメンバー</div>

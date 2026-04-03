@@ -886,8 +886,7 @@ function App(){
                 </div>
               </div>
               {/* カレンダー */}
-              <div style={{ overflowX:"auto" }}>
-              <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${BRAND_LIGHT}`, overflow:"hidden", minWidth:560 }}>
+              <div style={{ background:"#fff", borderRadius:12, border:`1px solid ${BRAND_LIGHT}`, overflow:"hidden" }}>
                 {/* 曜日ヘッダー */}
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", borderBottom:`1px solid ${BRAND_LIGHT}` }}>
                   {DOW_LABELS.map((d,i)=>(
@@ -933,7 +932,6 @@ function App(){
                     })}
                   </div>
                 ))}
-              </div>
               </div>
               <p style={{ fontSize:12, color:"#8a9ab0", marginTop:10 }}>※ 日付をタップして予約、予約ブロックをタップで詳細確認</p>
             </div>

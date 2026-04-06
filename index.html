@@ -563,22 +563,30 @@ function App(){
     setResvDetail(null); toast("予約を削除しました");
   },[]);
 
-  /* ─ 施設予約: イベント時間帯にMEDIUMにいるメンバー ─ */
+  /* ─ 施設予約: イベント時間帯にMEDIUMにいるメンバー（在席時間順） ─ */
   const getMembersAtMedium = useCallback((dateStr, startTime, endTime)=>{
     const evStart=toMinutes(startTime), evEnd=toMinutes(endTime);
     const STATUS_RANGE={ MEDIUM_ALL:[9*60,18*60], AM_MEDIUM_PM_OTHER:[9*60,12*60], PM_MEDIUM_AM_OTHER:[12*60,18*60] };
-    return members.filter(m=>{
+    const STATUS_LABEL={ MEDIUM_ALL:"終日", AM_MEDIUM_PM_OTHER:"AM（9:00〜12:00）", PM_MEDIUM_AM_OTHER:"PM（12:00〜18:00）" };
+    const result=[];
+    members.forEach(m=>{
       const entry=schedules[m.id]?.[dateStr];
-      if (!entry) return false;
+      if (!entry) return;
       const status=entry.status||entry, gaps=entry.gaps||[];
       const range=STATUS_RANGE[status];
-      if (!range) return false;
+      if (!range) return;
       const [rs,re]=range;
-      for (let min=Math.max(evStart,rs);min<Math.min(evEnd,re);min++){
-        if (!gaps.some(g=>min>=toMinutes(g.start)&&min<toMinutes(g.end))) return true;
+      const overlapStart=Math.max(evStart,rs), overlapEnd=Math.min(evEnd,re);
+      if (overlapStart>=overlapEnd) return;
+      let presentMins=0;
+      for (let min=overlapStart;min<overlapEnd;min++){
+        if (!gaps.some(g=>min>=toMinutes(g.start)&&min<toMinutes(g.end))) presentMins++;
       }
-      return false;
+      if (presentMins===0) return;
+      const eventGaps=gaps.filter(g=>toMinutes(g.end)>evStart&&toMinutes(g.start)<evEnd);
+      result.push({ member:m, presentMins, statusLabel:STATUS_LABEL[status], eventGaps });
     });
+    return result.sort((a,b)=>b.presentMins-a.presentMins);
   },[members,schedules]);
 
   /* ─ 月ナビ ─ */
@@ -1084,11 +1092,15 @@ function App(){
                   <div style={{ fontSize:11, fontWeight:600, color:BRAND, marginBottom:6 }}>この時間帯にMEDIUMにいるメンバー</div>
                   {present.length===0
                     ? <span style={{ fontSize:12, color:"#8a9ab0" }}>スケジュール未登録または不在</span>
-                    : <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                        {present.map(m=>(
-                          <span key={m.id} style={{ display:"flex", alignItems:"center", gap:4, background:"#fff", border:`1px solid ${BRAND_LIGHT}`, borderRadius:20, padding:"2px 8px 2px 4px", fontSize:12 }}>
-                            <span style={{ width:18, height:18, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:8, fontWeight:700 }}>{initials(m.name)}</span>
-                            {m.name}
+                    : <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                        {present.map(({member:m, statusLabel, eventGaps})=>(
+                          <span key={m.id} style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:5, background:"#fff", border:`1px solid ${BRAND_LIGHT}`, borderRadius:8, padding:"4px 8px", fontSize:12 }}>
+                            <span style={{ width:18, height:18, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:8, fontWeight:700, flexShrink:0 }}>{initials(m.name)}</span>
+                            <span style={{ fontWeight:600 }}>{m.name}</span>
+                            <span style={{ color:BRAND, fontSize:11 }}>{statusLabel}</span>
+                            {eventGaps.map((g,i)=>(
+                              <span key={i} style={{ color:"#e05", fontSize:11 }}>一時不在 {g.start}〜{g.end}</span>
+                            ))}
                           </span>
                         ))}
                       </div>}
@@ -1133,11 +1145,15 @@ function App(){
                 <div style={{ fontSize:12, fontWeight:700, color:BRAND, marginBottom:8 }}>この時間帯にMEDIUMにいるメンバー</div>
                 {present.length===0
                   ? <span style={{ fontSize:12, color:"#8a9ab0" }}>スケジュール未登録または不在</span>
-                  : <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                      {present.map(m=>(
-                        <span key={m.id} style={{ display:"flex", alignItems:"center", gap:5, background:"#fff", border:`1px solid ${BRAND_LIGHT}`, borderRadius:20, padding:"4px 10px 4px 4px", fontSize:13 }}>
-                          <span style={{ width:22, height:22, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700 }}>{initials(m.name)}</span>
-                          {m.name}
+                  : <div style={{ display:"flex", flexDirection:"column", gap:5 }}>
+                      {present.map(({member:m, statusLabel, eventGaps})=>(
+                        <span key={m.id} style={{ display:"flex", alignItems:"center", flexWrap:"wrap", gap:6, background:"#fff", border:`1px solid ${BRAND_LIGHT}`, borderRadius:8, padding:"5px 10px", fontSize:13 }}>
+                          <span style={{ width:22, height:22, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:9, fontWeight:700, flexShrink:0 }}>{initials(m.name)}</span>
+                          <span style={{ fontWeight:600 }}>{m.name}</span>
+                          <span style={{ color:BRAND, fontSize:12 }}>{statusLabel}</span>
+                          {eventGaps.map((g,i)=>(
+                            <span key={i} style={{ color:"#e05", fontSize:12 }}>一時不在 {g.start}〜{g.end}</span>
+                          ))}
                         </span>
                       ))}
                     </div>}

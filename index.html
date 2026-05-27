@@ -42,6 +42,8 @@ const BRAND_MID   = "#b3d4f0";
 const RED_ALERT   = "#e74c3c";
 const RED_LIGHT   = "#fdecea";
 const GREEN_OK    = "#27ae60";
+const YELLOW_ALERT = "#f59e0b";
+const YELLOW_LIGHT = "#fffbeb";
 
 /* ══ マスターデータ ═════════════════════════════════════════ */
 const STATUS_OPTIONS = [
@@ -267,6 +269,7 @@ function App(){
   const [confirmLoad, setConfirmLoad] = useState(null); // { year, month }
   const [quickEdit, setQuickEdit]     = useState(null); // { member, dateStr }
   const [gapView, setGapView]         = useState(null); // { member, dateStr } 他ユーザーの一時不在確認
+  const [dayDetail, setDayDetail]     = useState(null); // dateStr: 日別在席ビュー
   /* 施設予約 */
   const [calMonth, setCalMonth]       = useState({ year:TODAY.getFullYear(), month:TODAY.getMonth() });
   const [reservations, setReservations] = useState({});      // { dateStr: [reservation] }
@@ -479,10 +482,10 @@ function App(){
     toast("保存しました");
   }, [schedules]);
 
-  /* ─ MEDIUM不在チェック（1分単位スロット） ─ */
+  /* ─ MEDIUM在席チェック（1分単位スロット・実人数カウント） ─ */
   const absence = useCallback((ds)=>{
     const hasAny=members.some(m=>schedules[m.id]?.[ds]);
-    if (!hasAny) return { am:false, pm:false, intervals:[] };
+    if (!hasAny) return { alertLevel:null, intervals:[], hasZero:false, hasOne:false };
     const WORK_START=9*60, WORK_END=18*60, TOTAL=WORK_END-WORK_START;
     const STATUS_RANGE={
       MEDIUM_ALL:[WORK_START,WORK_END],
@@ -499,18 +502,48 @@ function App(){
       if (!range) return;
       for (let min=range[0];min<range[1];min++){
         const inGap=gaps.some(g=>min>=toMinutes(g.start)&&min<toMinutes(g.end));
-        if (!inGap) presence[min-WORK_START]=1;
+        if (!inGap) presence[min-WORK_START]++;
       }
     });
-    const amOk=presence.slice(0,3*60).some(v=>v===1);
-    const pmOk=presence.slice(3*60).some(v=>v===1);
+    const hasZero=presence.some(v=>v===0);
+    const hasOne=presence.some(v=>v===1);
     const intervals=[];
     let s=-1;
     for (let i=0;i<=TOTAL;i++){
       if (i<TOTAL&&presence[i]===0){ if(s===-1)s=i; }
       else { if(s!==-1){ intervals.push({start:toTimeStr(WORK_START+s),end:toTimeStr(WORK_START+i)}); s=-1; } }
     }
-    return { am:!amOk, pm:!pmOk, intervals };
+    const alertLevel=hasZero?'red':hasOne?'yellow':null;
+    return { alertLevel, intervals, hasZero, hasOne };
+  }, [members, schedules]);
+
+  /* ─ 時間帯別在席データ（日別ビュー用・1時間単位） ─ */
+  const getHourlyData = useCallback((ds)=>{
+    const STATUS_RANGE={
+      MEDIUM_ALL:[9*60,18*60],
+      AM_MEDIUM_PM_OTHER:[9*60,12*60],
+      PM_MEDIUM_AM_OTHER:[12*60,18*60],
+    };
+    return Array.from({length:9},(_,i)=>{
+      const h=9+i;
+      const present=[];
+      members.forEach(m=>{
+        const entry=schedules[m.id]?.[ds];
+        if (!entry) return;
+        const status=entry.status||entry;
+        const gaps=entry.gaps||[];
+        const range=STATUS_RANGE[status];
+        if (!range) return;
+        let mins=0;
+        for (let min=h*60;min<(h+1)*60;min++){
+          if (min>=range[0]&&min<range[1]){
+            if (!gaps.some(g=>min>=toMinutes(g.start)&&min<toMinutes(g.end))) mins++;
+          }
+        }
+        if (mins>0) present.push({member:m,mins});
+      });
+      return {hour:h,count:present.length,members:present};
+    });
   }, [members, schedules]);
 
   /* ─ 施設予約: 月データ読み込み ─ */
@@ -738,16 +771,18 @@ function App(){
                   <tr>
                     <th style={{ ...thS, position:"sticky", left:0, background:"#fff", zIndex:2, minWidth:90 }}>メンバー</th>
                     {viewDays.map(d=>{
-                      const ds=fmt(d), we=isWE(d), ab=!we?absence(ds):{am:false,pm:false,intervals:[]};
-                      const gapOnly=!ab.am&&!ab.pm&&ab.intervals?.length>0;
-                      const alert=ab.am||ab.pm||gapOnly;
-                      const aLabel=ab.am&&ab.pm?"終日":ab.am?"AM":ab.pm?"PM":gapOnly?ab.intervals[0].start:"";
+                      const ds=fmt(d), we=isWE(d), ab=!we?absence(ds):{alertLevel:null,intervals:[],hasZero:false,hasOne:false};
+                      const alertLevel=ab.alertLevel;
+                      const alertBg=alertLevel==='red'?RED_LIGHT:alertLevel==='yellow'?YELLOW_LIGHT:null;
+                      const alertColor=alertLevel==='red'?RED_ALERT:alertLevel==='yellow'?YELLOW_ALERT:null;
                       const isT=ds===fmt(TODAY);
                       return (
-                        <th key={ds} ref={isT?todayThRef:null} style={{ ...thS, background:alert?RED_LIGHT:isT?BRAND_LIGHT:we?"#f5f5f5":"#fff", color:alert?RED_ALERT:we?"#bbb":d.getDay()===6?BRAND:"#667", minWidth:40, borderBottom:isT?`2px solid ${BRAND}`:`1px solid ${BRAND_LIGHT}` }}>
+                        <th key={ds} ref={isT?todayThRef:null}
+                          onClick={!we?()=>setDayDetail(ds):undefined}
+                          style={{ ...thS, background:alertBg||(isT?BRAND_LIGHT:we?"#f5f5f5":"#fff"), color:alertColor||(we?"#bbb":d.getDay()===6?BRAND:"#667"), minWidth:40, borderBottom:isT?`2px solid ${BRAND}`:`1px solid ${BRAND_LIGHT}`, cursor:!we?"pointer":"default" }}>
                           <div>{d.getDate()}</div>
                           <div style={{ fontSize:10, fontWeight:400 }}>{dow(d)}</div>
-                          {alert&&<div style={{ fontSize:7, color:RED_ALERT, marginTop:1, fontWeight:600 }}>⚠{aLabel}</div>}
+                          {alertLevel&&<div style={{ fontSize:7, color:alertColor, marginTop:1, fontWeight:600 }}>⚠{alertLevel==='red'?'0人':'1人'}</div>}
                         </th>
                       );
                     })}
@@ -1216,6 +1251,47 @@ function App(){
             追加する
           </button>
         </div>
+      </Modal>
+
+      {/* ══ 日別在席ビューモーダル ════════════════════════════════ */}
+      <Modal open={!!dayDetail} onClose={()=>setDayDetail(null)}
+        title={dayDetail?`${dispDate(dayDetail)} 日別在席状況`:""}
+        width={500}>
+        {dayDetail&&(()=>{
+          const hours=getHourlyData(dayDetail);
+          return (
+            <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+              <p style={{ fontSize:11, color:"#8a9ab0", marginBottom:6 }}>9:00〜18:00 の1時間ごとのMEDIUM在席人数</p>
+              {hours.map(({hour,count,members:present})=>{
+                const rowBg=count===0?RED_LIGHT:count===1?YELLOW_LIGHT:"#f0faf4";
+                const cntColor=count===0?RED_ALERT:count===1?YELLOW_ALERT:GREEN_OK;
+                const borderColor=count===0?RED_ALERT+"44":count===1?YELLOW_ALERT+"44":"#b7dfc5";
+                return (
+                  <div key={hour} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", borderRadius:8, background:rowBg, border:`1px solid ${borderColor}` }}>
+                    <span style={{ fontSize:12, fontWeight:600, color:"#556", width:88, flexShrink:0 }}>{hour}:00〜{hour+1}:00</span>
+                    <span style={{ fontSize:14, fontWeight:700, color:cntColor, width:32, textAlign:"center", flexShrink:0 }}>{count}人</span>
+                    <div style={{ display:"flex", flexWrap:"wrap", gap:4, flex:1, minWidth:0 }}>
+                      {present.length===0
+                        ? <span style={{ fontSize:12, color:RED_ALERT, fontWeight:500 }}>不在</span>
+                        : present.map(({member:m,mins})=>(
+                            <span key={m.id} style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#fff", border:`1px solid ${BRAND_LIGHT}`, borderRadius:12, padding:"2px 7px 2px 3px", fontSize:11, lineHeight:1.4 }}>
+                              <span style={{ width:16, height:16, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:7, fontWeight:700, flexShrink:0 }}>{initials(m.name)}</span>
+                              <span>{m.name}</span>
+                              {mins<60&&<span style={{ color:YELLOW_ALERT, fontSize:10, fontWeight:600 }}>（{mins}分）</span>}
+                            </span>
+                          ))}
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{ display:"flex", gap:14, marginTop:8, fontSize:11, color:"#667" }}>
+                <span><span style={{ color:RED_ALERT, fontWeight:700 }}>■</span> 0人（不在）</span>
+                <span><span style={{ color:YELLOW_ALERT, fontWeight:700 }}>■</span> 1人</span>
+                <span><span style={{ color:GREEN_OK, fontWeight:700 }}>■</span> 2人以上</span>
+              </div>
+            </div>
+          );
+        })()}
       </Modal>
 
       <Toast message={toastMsg} visible={toastVis}/>

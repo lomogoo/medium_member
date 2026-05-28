@@ -1257,8 +1257,8 @@ function App(){
           };
           const isToday=dayDetail===fmt(TODAY);
           const nowMin=isToday?new Date().getHours()*60+new Date().getMinutes():null;
-          const nowY=(nowMin&&nowMin>=WS&&nowMin<=18*60)?toY(nowMin):null;
-          const MW=Math.max(52,Math.floor(320/members.length));
+          const nowY=(nowMin!=null&&nowMin>=WS&&nowMin<=18*60)?toY(nowMin):null;
+          const zeroRanges=absence(dayDetail).intervals.map(iv=>({s:toMinutes(iv.start),e:toMinutes(iv.end)}));
           return (
             <div>
               <div style={{display:"flex",alignItems:"flex-start"}}>
@@ -1272,57 +1272,66 @@ function App(){
                     ))}
                   </div>
                 </div>
-                {/* メンバー列（横スクロール） */}
-                <div style={{overflowX:"auto",flex:1,position:"relative"}}>
-                  <div style={{display:"flex",gap:2,minWidth:members.length*MW}}>
-                    {members.map(m=>{
-                      const {blks,status}=getBlocks(m);
-                      return (
-                        <div key={m.id} style={{flex:1,minWidth:MW}}>
-                          {/* メンバーヘッダー */}
-                          <div style={{height:44,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,borderBottom:`1px solid ${BRAND_LIGHT}`,paddingBottom:4}}>
-                            <div style={{width:24,height:24,borderRadius:"50%",background:m.color,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,flexShrink:0}}>{initials(m.name)}</div>
-                            <div style={{fontSize:9,color:"#445",textAlign:"center",lineHeight:1.2,width:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",padding:"0 2px"}}>{m.name}</div>
-                          </div>
-                          {/* タイムグリッド */}
-                          <div style={{position:"relative",height:GRID_H,background:"#f9fafc",border:`1px solid #edf0f5`,borderRadius:4,overflow:"hidden"}}>
-                            {HOURS.map((_,i)=>(
-                              <div key={i} style={{position:"absolute",top:i*HOUR_H,left:0,right:0,borderTop:i===0?"none":`1px solid #edf0f5`}}/>
-                            ))}
-                            {blks.map((b,i)=>(
-                              <div key={i} style={{position:"absolute",top:toY(b.start)+1,height:Math.max(toH(b.start,b.end)-2,4),left:3,right:3,background:m.color,borderRadius:3,opacity:0.85}}/>
-                            ))}
-                            {status==="ABSENT"&&(
-                              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                                <span style={{fontSize:16,color:RED_ALERT}}>✖</span>
-                              </div>
-                            )}
-                            {!status&&(
-                              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                                <span style={{fontSize:12,color:"#ccc"}}>—</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
+                {/* メンバーエリア（スクロールなし・全員1画面） */}
+                <div style={{flex:1,minWidth:0}}>
+                  {/* メンバーヘッダー行 */}
+                  <div style={{display:"flex",height:44,borderBottom:`1px solid ${BRAND_LIGHT}`}}>
+                    {members.map(m=>(
+                      <div key={m.id} style={{flex:1,minWidth:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2}}>
+                        <div style={{width:22,height:22,borderRadius:"50%",background:m.color,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:8,fontWeight:700,flexShrink:0}}>{initials(m.name)}</div>
+                        <div style={{fontSize:8,color:"#445",textAlign:"center",lineHeight:1.2,width:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",padding:"0 2px"}}>{m.name}</div>
+                      </div>
+                    ))}
                   </div>
-                  {/* 現在時刻ライン */}
-                  {nowY!==null&&(
-                    <div style={{position:"absolute",top:44+nowY,left:0,right:0,zIndex:10,pointerEvents:"none",display:"flex",alignItems:"center"}}>
-                      <div style={{width:8,height:8,borderRadius:"50%",background:RED_ALERT,flexShrink:0}}/>
-                      <div style={{flex:1,borderTop:`2px solid ${RED_ALERT}`}}/>
+                  {/* グリッド本体（共通レイヤー構造） */}
+                  <div style={{position:"relative",height:GRID_H,background:"#f9fafc",border:`1px solid #edf0f5`,borderRadius:"0 0 4px 4px",overflow:"hidden"}}>
+                    {/* 時間グリッド線（全幅） */}
+                    {HOURS.map((h,i)=>(
+                      <div key={h} style={{position:"absolute",top:i*HOUR_H,left:0,right:0,borderTop:i===0?"none":"1px solid #edf0f5",zIndex:1,pointerEvents:"none"}}/>
+                    ))}
+                    {/* 誰もいない時間帯（赤帯・全幅） */}
+                    {zeroRanges.map((iv,i)=>(
+                      <div key={i} style={{position:"absolute",top:toY(iv.s),height:Math.max(toH(iv.s,iv.e),2),left:0,right:0,background:"rgba(231,76,60,0.10)",zIndex:0,pointerEvents:"none"}}/>
+                    ))}
+                    {/* メンバー列（絶対配置で重ねる） */}
+                    <div style={{position:"absolute",inset:0,display:"flex",gap:1}}>
+                      {members.map(m=>{
+                        const {blks,status}=getBlocks(m);
+                        return (
+                          <div key={m.id} style={{flex:1,minWidth:0,position:"relative",height:"100%"}}>
+                            {/* 在席ブロック */}
+                            {blks.map((b,i)=>(
+                              <div key={i} style={{position:"absolute",top:toY(b.start)+1,height:Math.max(toH(b.start,b.end)-2,4),left:2,right:2,background:m.color,borderRadius:3,opacity:0.85,zIndex:2}}/>
+                            ))}
+                            {/* 不在ブロック（薄い赤・終日） */}
+                            {status==="ABSENT"&&(
+                              <div style={{position:"absolute",top:1,bottom:1,left:2,right:2,background:"rgba(231,76,60,0.22)",borderRadius:3,zIndex:2}}/>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  )}
+                    {/* 現在時刻ライン */}
+                    {nowY!==null&&(
+                      <div style={{position:"absolute",top:nowY,left:0,right:0,zIndex:10,pointerEvents:"none",display:"flex",alignItems:"center"}}>
+                        <div style={{width:8,height:8,borderRadius:"50%",background:RED_ALERT,flexShrink:0}}/>
+                        <div style={{flex:1,borderTop:`2px solid ${RED_ALERT}`}}/>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
               {/* 凡例 */}
-              <div style={{display:"flex",gap:14,marginTop:10,fontSize:11,color:"#667",flexWrap:"wrap",alignItems:"center"}}>
+              <div style={{display:"flex",gap:12,marginTop:10,fontSize:11,color:"#667",flexWrap:"wrap",alignItems:"center"}}>
                 <span style={{display:"flex",alignItems:"center",gap:4}}>
                   <span style={{width:12,height:12,borderRadius:2,background:BRAND,display:"inline-block",opacity:0.85}}/>在席
                 </span>
-                <span style={{color:RED_ALERT,fontWeight:600}}>✖ 不在</span>
-                <span style={{color:"#bbb"}}>— 未設定</span>
+                <span style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{width:12,height:12,borderRadius:2,background:"rgba(231,76,60,0.22)",display:"inline-block"}}/>不在
+                </span>
+                <span style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{width:12,height:12,borderRadius:2,background:"rgba(231,76,60,0.10)",border:"1px solid rgba(231,76,60,0.25)",display:"inline-block"}}/>誰もいない時間帯
+                </span>
                 {isToday&&<span style={{color:RED_ALERT,display:"flex",alignItems:"center",gap:4}}>
                   <span style={{width:16,height:2,background:RED_ALERT,display:"inline-block",verticalAlign:"middle"}}/>現在時刻
                 </span>}

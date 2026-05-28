@@ -517,34 +517,6 @@ function App(){
     return { alertLevel, intervals, hasZero, hasOne };
   }, [members, schedules]);
 
-  /* ─ 時間帯別在席データ（日別ビュー用・1時間単位） ─ */
-  const getHourlyData = useCallback((ds)=>{
-    const STATUS_RANGE={
-      MEDIUM_ALL:[9*60,18*60],
-      AM_MEDIUM_PM_OTHER:[9*60,12*60],
-      PM_MEDIUM_AM_OTHER:[12*60,18*60],
-    };
-    return Array.from({length:9},(_,i)=>{
-      const h=9+i;
-      const present=[];
-      members.forEach(m=>{
-        const entry=schedules[m.id]?.[ds];
-        if (!entry) return;
-        const status=entry.status||entry;
-        const gaps=entry.gaps||[];
-        const range=STATUS_RANGE[status];
-        if (!range) return;
-        let mins=0;
-        for (let min=h*60;min<(h+1)*60;min++){
-          if (min>=range[0]&&min<range[1]){
-            if (!gaps.some(g=>min>=toMinutes(g.start)&&min<toMinutes(g.end))) mins++;
-          }
-        }
-        if (mins>0) present.push({member:m,mins});
-      });
-      return {hour:h,count:present.length,members:present};
-    });
-  }, [members, schedules]);
 
   /* ─ 施設予約: 月データ読み込み ─ */
   const loadReservations = useCallback(async (year, month)=>{
@@ -1253,41 +1225,107 @@ function App(){
         </div>
       </Modal>
 
-      {/* ══ 日別在席ビューモーダル ════════════════════════════════ */}
+      {/* ══ 日別在席ビューモーダル（タイムライン型） ════════════════ */}
       <Modal open={!!dayDetail} onClose={()=>setDayDetail(null)}
         title={dayDetail?`${dispDate(dayDetail)} 日別在席状況`:""}
-        width={500}>
+        width={620}>
         {dayDetail&&(()=>{
-          const hours=getHourlyData(dayDetail);
+          const HOUR_H=54, WS=9*60;
+          const HOURS=[9,10,11,12,13,14,15,16,17,18];
+          const GRID_H=9*HOUR_H;
+          const SR={ MEDIUM_ALL:[9*60,18*60], AM_MEDIUM_PM_OTHER:[9*60,12*60], PM_MEDIUM_AM_OTHER:[12*60,18*60] };
+          const toY=(min)=>((min-WS)/60)*HOUR_H;
+          const toH=(s,e)=>((e-s)/60)*HOUR_H;
+          const getBlocks=(m)=>{
+            const entry=schedules[m.id]?.[dayDetail];
+            if (!entry) return {blks:[],status:null};
+            const status=entry.status||entry;
+            const gaps=entry.gaps||[];
+            const range=SR[status];
+            if (!range) return {blks:[],status};
+            const [rs,re]=range; const res=[]; let cur=rs;
+            [...gaps]
+              .filter(g=>toMinutes(g.end)>rs&&toMinutes(g.start)<re)
+              .sort((a,b)=>toMinutes(a.start)-toMinutes(b.start))
+              .forEach(g=>{
+                const gs=Math.max(toMinutes(g.start),rs),ge=Math.min(toMinutes(g.end),re);
+                if(cur<gs) res.push({start:cur,end:gs});
+                cur=Math.max(cur,ge);
+              });
+            if(cur<re) res.push({start:cur,end:re});
+            return {blks:res,status};
+          };
+          const isToday=dayDetail===fmt(TODAY);
+          const nowMin=isToday?new Date().getHours()*60+new Date().getMinutes():null;
+          const nowY=(nowMin&&nowMin>=WS&&nowMin<=18*60)?toY(nowMin):null;
+          const MW=Math.max(52,Math.floor(320/members.length));
           return (
-            <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
-              <p style={{ fontSize:11, color:"#8a9ab0", marginBottom:6 }}>9:00〜18:00 の1時間ごとのMEDIUM在席人数</p>
-              {hours.map(({hour,count,members:present})=>{
-                const rowBg=count===0?RED_LIGHT:count===1?YELLOW_LIGHT:"#f0faf4";
-                const cntColor=count===0?RED_ALERT:count===1?YELLOW_ALERT:GREEN_OK;
-                const borderColor=count===0?RED_ALERT+"44":count===1?YELLOW_ALERT+"44":"#b7dfc5";
-                return (
-                  <div key={hour} style={{ display:"flex", alignItems:"center", gap:10, padding:"8px 12px", borderRadius:8, background:rowBg, border:`1px solid ${borderColor}` }}>
-                    <span style={{ fontSize:12, fontWeight:600, color:"#556", width:88, flexShrink:0 }}>{hour}:00〜{hour+1}:00</span>
-                    <span style={{ fontSize:14, fontWeight:700, color:cntColor, width:32, textAlign:"center", flexShrink:0 }}>{count}人</span>
-                    <div style={{ display:"flex", flexWrap:"wrap", gap:4, flex:1, minWidth:0 }}>
-                      {present.length===0
-                        ? <span style={{ fontSize:12, color:RED_ALERT, fontWeight:500 }}>不在</span>
-                        : present.map(({member:m,mins})=>(
-                            <span key={m.id} style={{ display:"inline-flex", alignItems:"center", gap:3, background:"#fff", border:`1px solid ${BRAND_LIGHT}`, borderRadius:12, padding:"2px 7px 2px 3px", fontSize:11, lineHeight:1.4 }}>
-                              <span style={{ width:16, height:16, borderRadius:"50%", background:m.color, color:"#fff", display:"inline-flex", alignItems:"center", justifyContent:"center", fontSize:7, fontWeight:700, flexShrink:0 }}>{initials(m.name)}</span>
-                              <span>{m.name}</span>
-                              {mins<60&&<span style={{ color:YELLOW_ALERT, fontSize:10, fontWeight:600 }}>（{mins}分）</span>}
-                            </span>
-                          ))}
-                    </div>
+            <div>
+              <div style={{display:"flex",alignItems:"flex-start"}}>
+                {/* 時間軸 */}
+                <div style={{flexShrink:0,width:38,paddingTop:44}}>
+                  <div style={{position:"relative",height:GRID_H}}>
+                    {HOURS.map((h,i)=>(
+                      <div key={h} style={{position:"absolute",top:i*HOUR_H-8,right:4,fontSize:9,color:"#8a9ab0",lineHeight:1,textAlign:"right",whiteSpace:"nowrap"}}>
+                        {String(h).padStart(2,"0")}:00
+                      </div>
+                    ))}
                   </div>
-                );
-              })}
-              <div style={{ display:"flex", gap:14, marginTop:8, fontSize:11, color:"#667" }}>
-                <span><span style={{ color:RED_ALERT, fontWeight:700 }}>■</span> 0人（不在）</span>
-                <span><span style={{ color:YELLOW_ALERT, fontWeight:700 }}>■</span> 1人</span>
-                <span><span style={{ color:GREEN_OK, fontWeight:700 }}>■</span> 2人以上</span>
+                </div>
+                {/* メンバー列（横スクロール） */}
+                <div style={{overflowX:"auto",flex:1,position:"relative"}}>
+                  <div style={{display:"flex",gap:2,minWidth:members.length*MW}}>
+                    {members.map(m=>{
+                      const {blks,status}=getBlocks(m);
+                      return (
+                        <div key={m.id} style={{flex:1,minWidth:MW}}>
+                          {/* メンバーヘッダー */}
+                          <div style={{height:44,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:2,borderBottom:`1px solid ${BRAND_LIGHT}`,paddingBottom:4}}>
+                            <div style={{width:24,height:24,borderRadius:"50%",background:m.color,color:"#fff",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,fontWeight:700,flexShrink:0}}>{initials(m.name)}</div>
+                            <div style={{fontSize:9,color:"#445",textAlign:"center",lineHeight:1.2,width:"100%",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",padding:"0 2px"}}>{m.name}</div>
+                          </div>
+                          {/* タイムグリッド */}
+                          <div style={{position:"relative",height:GRID_H,background:"#f9fafc",border:`1px solid #edf0f5`,borderRadius:4,overflow:"hidden"}}>
+                            {HOURS.map((_,i)=>(
+                              <div key={i} style={{position:"absolute",top:i*HOUR_H,left:0,right:0,borderTop:i===0?"none":`1px solid #edf0f5`}}/>
+                            ))}
+                            {blks.map((b,i)=>(
+                              <div key={i} style={{position:"absolute",top:toY(b.start)+1,height:Math.max(toH(b.start,b.end)-2,4),left:3,right:3,background:m.color,borderRadius:3,opacity:0.85}}/>
+                            ))}
+                            {status==="ABSENT"&&(
+                              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                <span style={{fontSize:16,color:RED_ALERT}}>✖</span>
+                              </div>
+                            )}
+                            {!status&&(
+                              <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                                <span style={{fontSize:12,color:"#ccc"}}>—</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* 現在時刻ライン */}
+                  {nowY!==null&&(
+                    <div style={{position:"absolute",top:44+nowY,left:0,right:0,zIndex:10,pointerEvents:"none",display:"flex",alignItems:"center"}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:RED_ALERT,flexShrink:0}}/>
+                      <div style={{flex:1,borderTop:`2px solid ${RED_ALERT}`}}/>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* 凡例 */}
+              <div style={{display:"flex",gap:14,marginTop:10,fontSize:11,color:"#667",flexWrap:"wrap",alignItems:"center"}}>
+                <span style={{display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{width:12,height:12,borderRadius:2,background:BRAND,display:"inline-block",opacity:0.85}}/>在席
+                </span>
+                <span style={{color:RED_ALERT,fontWeight:600}}>✖ 不在</span>
+                <span style={{color:"#bbb"}}>— 未設定</span>
+                {isToday&&<span style={{color:RED_ALERT,display:"flex",alignItems:"center",gap:4}}>
+                  <span style={{width:16,height:2,background:RED_ALERT,display:"inline-block",verticalAlign:"middle"}}/>現在時刻
+                </span>}
               </div>
             </div>
           );

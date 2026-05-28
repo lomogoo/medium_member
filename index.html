@@ -1259,6 +1259,23 @@ function App(){
           const nowMin=isToday?new Date().getHours()*60+new Date().getMinutes():null;
           const nowY=(nowMin!=null&&nowMin>=WS&&nowMin<=18*60)?toY(nowMin):null;
           const zeroRanges=absence(dayDetail).intervals.map(iv=>({s:toMinutes(iv.start),e:toMinutes(iv.end)}));
+          const pres=new Array(540).fill(0);
+          members.forEach(m=>{
+            const entry=schedules[m.id]?.[dayDetail];
+            if(!entry)return;
+            const st=entry.status||entry;
+            const gps=entry.gaps||[];
+            const rng=SR[st];
+            if(!rng)return;
+            for(let min=rng[0];min<rng[1];min++){
+              if(!gps.some(g=>min>=toMinutes(g.start)&&min<toMinutes(g.end))) pres[min-WS]++;
+            }
+          });
+          const oneRanges=[];let os=-1;
+          for(let i=0;i<=540;i++){
+            if(i<540&&pres[i]===1){if(os===-1)os=i;}
+            else{if(os!==-1){oneRanges.push({s:WS+os,e:WS+i});os=-1;}}
+          }
           return (
             <div>
               <div style={{display:"flex",alignItems:"flex-start"}}>
@@ -1289,24 +1306,23 @@ function App(){
                     {HOURS.map((h,i)=>(
                       <div key={h} style={{position:"absolute",top:i*HOUR_H,left:0,right:0,borderTop:i===0?"none":"1px solid #edf0f5",zIndex:1,pointerEvents:"none"}}/>
                     ))}
+                    {/* 1人しかいない時間帯（黄色帯・全幅） */}
+                    {oneRanges.map((iv,i)=>(
+                      <div key={i} style={{position:"absolute",top:toY(iv.s),height:Math.max(toH(iv.s,iv.e),2),left:0,right:0,background:"rgba(245,158,11,0.13)",zIndex:0,pointerEvents:"none"}}/>
+                    ))}
                     {/* 誰もいない時間帯（赤帯・全幅） */}
                     {zeroRanges.map((iv,i)=>(
-                      <div key={i} style={{position:"absolute",top:toY(iv.s),height:Math.max(toH(iv.s,iv.e),2),left:0,right:0,background:"rgba(231,76,60,0.10)",zIndex:0,pointerEvents:"none"}}/>
+                      <div key={i} style={{position:"absolute",top:toY(iv.s),height:Math.max(toH(iv.s,iv.e),2),left:0,right:0,background:"rgba(231,76,60,0.12)",zIndex:0,pointerEvents:"none"}}/>
                     ))}
                     {/* メンバー列（絶対配置で重ねる） */}
                     <div style={{position:"absolute",inset:0,display:"flex",gap:1}}>
                       {members.map(m=>{
-                        const {blks,status}=getBlocks(m);
+                        const {blks}=getBlocks(m);
                         return (
                           <div key={m.id} style={{flex:1,minWidth:0,position:"relative",height:"100%"}}>
-                            {/* 在席ブロック */}
                             {blks.map((b,i)=>(
                               <div key={i} style={{position:"absolute",top:toY(b.start)+1,height:Math.max(toH(b.start,b.end)-2,4),left:2,right:2,background:m.color,borderRadius:3,opacity:0.85,zIndex:2}}/>
                             ))}
-                            {/* 不在ブロック（薄い赤・終日） */}
-                            {status==="ABSENT"&&(
-                              <div style={{position:"absolute",top:1,bottom:1,left:2,right:2,background:"rgba(231,76,60,0.22)",borderRadius:3,zIndex:2}}/>
-                            )}
                           </div>
                         );
                       })}
@@ -1327,10 +1343,10 @@ function App(){
                   <span style={{width:12,height:12,borderRadius:2,background:BRAND,display:"inline-block",opacity:0.85}}/>在席
                 </span>
                 <span style={{display:"flex",alignItems:"center",gap:4}}>
-                  <span style={{width:12,height:12,borderRadius:2,background:"rgba(231,76,60,0.22)",display:"inline-block"}}/>不在
+                  <span style={{width:12,height:12,borderRadius:2,background:"rgba(245,158,11,0.25)",border:"1px solid rgba(245,158,11,0.4)",display:"inline-block"}}/>1人のみの時間帯
                 </span>
                 <span style={{display:"flex",alignItems:"center",gap:4}}>
-                  <span style={{width:12,height:12,borderRadius:2,background:"rgba(231,76,60,0.10)",border:"1px solid rgba(231,76,60,0.25)",display:"inline-block"}}/>誰もいない時間帯
+                  <span style={{width:12,height:12,borderRadius:2,background:"rgba(231,76,60,0.12)",border:"1px solid rgba(231,76,60,0.25)",display:"inline-block"}}/>誰もいない時間帯
                 </span>
                 {isToday&&<span style={{color:RED_ALERT,display:"flex",alignItems:"center",gap:4}}>
                   <span style={{width:16,height:2,background:RED_ALERT,display:"inline-block",verticalAlign:"middle"}}/>現在時刻
